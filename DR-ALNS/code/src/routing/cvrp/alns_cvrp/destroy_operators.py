@@ -6,11 +6,17 @@ from routing.cvrp.alns_cvrp.cvrp_helper_functions import determine_nr_nodes_to_r
 
 # --- random removal ---
 def random_removal(current, random_state, nr_nodes_to_remove=None):
+    print("start destroy")
     destroyed_solution = copy.deepcopy(current)
+
+    for route in destroyed_solution.routes:
+        route = remove_charging_station(route, destroyed_solution.tasks_info)
+
     visited_customers = [customer for route in destroyed_solution.routes for customer in route]
 
+    nb_customers = len(destroyed_solution.customers)
     if nr_nodes_to_remove is None:
-        nr_nodes_to_remove = determine_nr_nodes_to_remove(destroyed_solution.nb_customers)
+        nr_nodes_to_remove = determine_nr_nodes_to_remove(nb_customers)
 
     nodes_to_remove = random.sample(visited_customers, nr_nodes_to_remove)
     for node in nodes_to_remove:
@@ -18,6 +24,8 @@ def random_removal(current, random_state, nr_nodes_to_remove=None):
             while node in route:
                 route.remove(node)
                 visited_customers.remove(node)
+                destroyed_solution.unassigned.append(node[0])
+
     destroyed_solution.routes = [route for route in destroyed_solution.routes if route != []]
 
     return destroyed_solution
@@ -130,3 +138,17 @@ def neighbor_graph_removal(current, random_state, nr_nodes_to_remove=None, prob=
                 break
 
     return destroyed_solution
+
+def find_route(current, customer):
+    """
+    Return the route that contains the passed-in customer.
+    """
+    for route in current.routes:
+        if customer in route:
+            return route
+
+    raise ValueError(f"Solution does not contain customer {customer}.")
+
+def remove_charging_station(route, tasks_info):
+    route[:] = [node for node in route if tasks_info[node]['Type'] != 'f']
+    return route

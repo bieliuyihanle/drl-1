@@ -17,7 +17,7 @@ from routing.cvrp.alns_cvrp import cvrp_helper_functions
 
 from routing.cvrp.alns_cvrp.cvrp_env import cvrpEnv
 from routing.cvrp.alns_cvrp.destroy_operators import neighbor_graph_removal, random_removal, relatedness_removal
-from routing.cvrp.alns_cvrp.repair_operators import regret_insertion
+from routing.cvrp.alns_cvrp.repair_operators import regret_insertion, random_repair
 from routing.cvrp.alns_cvrp.initial_solution import compute_initial_solution
 
 import inspect
@@ -35,11 +35,18 @@ class cvrpAlnsEnv_LSA1(Env):
         self.max_temperature = 5
         self.temperature = 5
 
-        # LOAD INSTANCE
-        base_path = Path(__file__).resolve().parents[2]
-        self.instance_file = str(base_path.joinpath(self.config["instance_file"]))
+        # # LOAD INSTANCE
+        # base_path = Path(__file__).resolve().parents[2]
+        # self.instance_file = str(base_path.joinpath(self.config["instance_file"]))
+        #
+        # self.instances = self.config["instance_nr"]
 
-        self.instances = self.config["instance_nr"]
+        # LOAD INSTANCE FILES
+        base_path = Path(__file__).resolve().parents[2]
+
+        self.instance_folder = str(base_path.joinpath(self.config["instance_folder"]))
+        self.instances = cvrp_helper_functions.list_problem_files(self.instance_folder)
+
         self.instance = None
         self.best_routes = []
 
@@ -60,7 +67,7 @@ class cvrpAlnsEnv_LSA1(Env):
         self.max_iterations = self.config["iterations"]  # max number of generations in an episode
 
         # Action and observation spaces
-        self.action_space = gym.spaces.MultiDiscrete([3, 1, 10, 100])
+        self.action_space = gym.spaces.MultiDiscrete([1, 1, 10, 100])
         self.observation_space = gym.spaces.Box(shape=(8,), low=0, high=100, dtype=np.float64)
 
     def make_observation(self):
@@ -93,17 +100,24 @@ class cvrpAlnsEnv_LSA1(Env):
 
         # —— 3. 随机选一个 CVRP 实例 —— #
         self.instance = random.choice(self.instances)
-
+        print(self.instance)
         # —— 4. 读入实例并构造初始解 —— #
-        nb_customers, truck_capacity, dist_matrix_data, dist_depot_data, demands_data = \
-            cvrp_helper_functions.read_input_cvrp(self.instance_file, self.instance)
+        # nb_customers, truck_capacity, dist_matrix_data, dist_depot_data, demands_data = \
+        #     cvrp_helper_functions.read_input_cvrp(self.instance_file, self.instance)
+        (tank_capacity, now_energy, load_capacity, fuel_consumption_rate,
+         charging_rate, velocity, depot, customers, fuel_stations,
+         nodes, tasks_info, distance_matrix) = \
+            cvrp_helper_functions.load_problem_instance(self.instance)
 
+
+        nb_customers = len(customers)
         state = cvrpEnv(
-            [], nb_customers, truck_capacity,
-            dist_matrix_data, dist_depot_data, demands_data,
-            self.instance, SEED)
+            [], tank_capacity, now_energy, load_capacity, fuel_consumption_rate,
+            charging_rate, velocity, depot, customers, fuel_stations,
+            nodes, tasks_info, distance_matrix, self.instance, SEED)
 
         self.initial_solution = compute_initial_solution(state, self.rnd_state)
+        print(self.initial_solution.routes)
         self.current_solution = copy.deepcopy(self.initial_solution)
         self.best_solution = copy.deepcopy(self.initial_solution)
 
@@ -111,10 +125,10 @@ class cvrpAlnsEnv_LSA1(Env):
         # add operators to the dr_alns class
         self.dr_alns = ALNS(self.rnd_state)
         self.dr_alns.add_destroy_operator(random_removal)
-        self.dr_alns.add_destroy_operator(relatedness_removal)
-        self.dr_alns.add_destroy_operator(neighbor_graph_removal)
+        # self.dr_alns.add_destroy_operator(relatedness_removal)
+        # self.dr_alns.add_destroy_operator(neighbor_graph_removal)
 
-        self.dr_alns.add_repair_operator(regret_insertion)
+        self.dr_alns.add_repair_operator(random_repair)
 
         # —— 6. 重置各类统计、计数器 —— #
         self.stagcount = 0
@@ -151,12 +165,13 @@ class cvrpAlnsEnv_LSA1(Env):
         d_idx, r_idx = action[0], action[1]
         d_name, d_operator = self.dr_alns.destroy_operators[d_idx]
 
+        nb_customers = len(current.customers)
         factors = {0: 0.1, 1: 0.2, 2: 0.3, 3: 0.4, 4: 0.5, 5: 0.6, 6: 0.7, 7: 0.8, 8: 0.9, 9: 1.0}
-        nr_nodes_to_remove = round(factors[action[2]] * current.nb_customers)
+        nr_nodes_to_remove = round(factors[action[2]] * nb_customers)
 
         self.temperature = (1/(action[3]+1)) * self.max_temperature
 
-        if nr_nodes_to_remove == current.nb_customers:
+        if nr_nodes_to_remove == nb_customers:
             nr_nodes_to_remove -= 1
 
         destroyed = d_operator(current, self.rnd_state, nr_nodes_to_remove)

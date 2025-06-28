@@ -1,10 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="VcsDirectoryMappings">
+    <mapping directory="$PROJECT_DIR$" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/DR-ALNS" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/drl" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/drl-alns/dln-alns" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/drl/DR-ALNS" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/drl/drl-alns/dln-alns" vcs="Git" />
   </component>
 </project>

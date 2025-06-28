@@ -16,9 +16,9 @@ def evaluate_solution(routes, tasks_info, distance_matrix, tank_capacity, now_en
         time_cost = 0
         for i in range(1, len(route)):
             # print(route[i])
-            if tasks_info[route[i]]['Type'] is 'f':
+            if tasks_info[route[i]]['Type'] == 'f':
                 time_cost += 0
-            elif tasks_info[route[i]]['Type'] is 'c':
+            elif tasks_info[route[i]]['Type'] == 'c':
                 time_cost += tasks_info[route[i]]['Due-Date']-arrival_times[i-1]
             # print(time_cost)
         route_cost = dist_cost + 0.1 * time_cost + 1000
@@ -33,12 +33,21 @@ def evaluate_solution(routes, tasks_info, distance_matrix, tank_capacity, now_en
 
 class cvrpEnv:
 
-    def __init__(self, initial_solution, nb_customers, truck_capacity, dist_matrix_data, dist_depot_data, demands_data, problem_instance, seed):
-        self.nb_customers = nb_customers
-        self.truck_capacity = truck_capacity
-        self.dist_matrix_data = dist_matrix_data
-        self.dist_depot_data = dist_depot_data
-        self.demands_data = demands_data
+    def __init__(self, initial_solution, tank_capacity, now_energy, load_capacity, fuel_consumption_rate,
+         charging_rate, velocity, depot, customers, fuel_stations,
+         nodes, tasks_info, distance_matrix, problem_instance, seed, unassigned=None):
+        self.customers = customers
+        self.tasks_info = tasks_info
+        self.distance_matrix = distance_matrix
+        self.tank_capacity = tank_capacity
+        self.now_energy = now_energy
+        self.fuel_consumption_rate = fuel_consumption_rate
+        self.charging_rate = charging_rate
+        self.velocity = velocity
+        self.load_capacity = load_capacity
+        self.fuel_stations = fuel_stations
+        self.nodes = nodes
+        self.unassigned = unassigned if unassigned is not None else []
 
         self.seed = seed
         self.problem_instance = problem_instance
@@ -46,5 +55,6 @@ class cvrpEnv:
         self.routes = initial_solution
 
     def objective(self, best=False):
-        score = evaluate_solution(self.routes, self.truck_capacity, self.dist_matrix_data, self.dist_depot_data, self.demands_data)
+        score = evaluate_solution(self.routes, self.tasks_info, self.distance_matrix, self.tank_capacity, self.now_energy,
+                                  self.fuel_consumption_rate, self.charging_rate, self.velocity)
         return score

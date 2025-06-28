@@ -1,4 +1,5 @@
 import math
+import random
 from typing import List, Dict, Any, Tuple
 
 
@@ -96,26 +97,34 @@ def innh(customers):
 # —— 使用示例 —— #
 
 if __name__ == '__main__':
-    # depot = ['D0', 'd', 10.0, 20.0, 8, 18, 0, 100]
-    # customers = [['C1', 'c', 12.0, 22.0, 9, 12, 10, 100],
-    #              ['C2', 'c', 15.0, 25.0, 10, 14, 5, 100]]
-    # fuel_stations = [['S1', 'f', 11.0, 21.0, 0, 24, 0, 100],
-    #                  ['S2', 'f', 13.0, 23.0, 0, 24, 0, 100]]
-    #
-    # nodes, tasks_info = build_tasks_info(depot, customers, fuel_stations)
-    # dist_matrix = compute_dist_matrix(nodes, tasks_info)
-    #
-    #
-    # unvisited_customers = [1,2,3,4,5,1,1,2]
-    # a = [[2,3,4,5],[2]]
-    # flattened_new_routes = [customer for route in a for customer in route]
-    # unvisited_customers = [customer for customer in unvisited_customers if customer not in flattened_new_routes]
-    # print(unvisited_customers)
-    #
-    # # 验证
-    # print("节点顺序:", nodes)
-    # print("C1 属性:", tasks_info['C1'])
-    # print("C1→S2 距离:", dist_matrix['C1']['C2'])
+    depot = ['D0', 'd', 10.0, 20.0, 8, 18, 0, 100]
+    customers = [['C1', 'c', 12.0, 22.0, 9, 12, 10, 100],
+                 ['C2', 'c', 15.0, 25.0, 10, 14, 5, 100]]
+    fuel_stations = [['S1', 'f', 11.0, 21.0, 0, 24, 0, 100],
+                     ['S2', 'f', 13.0, 23.0, 0, 24, 0, 100]]
 
-    unvisited_customers = [1]
-    print(bool(unvisited_customers))
+    nodes, tasks_info = build_tasks_info(depot, customers, fuel_stations)
+    dist_matrix = compute_dist_matrix(nodes, tasks_info)
+
+
+    unvisited_customers = [1,2,3,4,5,1,1,2]
+    a = [[2,3,4,5],[2]]
+    flattened_new_routes = [customer for route in a for customer in route]
+    unvisited_customers = [customer for customer in unvisited_customers if customer not in flattened_new_routes]
+    print(unvisited_customers)
+
+    # 验证
+    print("节点顺序:", nodes)
+    print("C1 属性:", tasks_info['C1'])
+    print("C1→S2 距离:", dist_matrix['C1']['C2'])
+
+    a = {}
+    a[5] = 1
+    a[1] = 2
+    a[3] = 5
+    chosen = sorted(a, reverse=False)
+    print(chosen)
+
+
+    print(random.sample(nodes, 3))
+
