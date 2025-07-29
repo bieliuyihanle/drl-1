@@ -379,23 +379,23 @@ class Trainer(object):
         destination = self._model_path + '_1/' + self.env_name + '.py'
         shutil.copyfile(source, destination)
 
-    # def _tensorboard(self, env_name=None):
-    #     # Kill current session
-    #     self._tensorboard_kill()
-    #
-    #     # Open the dir of the current env
-    #     cmd = "tensorboard --logdir " + self._env_path #used to be tensorboard.exe --logdir " + ...
-    #     print("Launching tensorboard at {}".format(self._env_path))
-    #     DEVNULL = open(os.devnull, "wb")
-    #     subprocess.Popen(cmd, shell=True, stdout=DEVNULL, stderr=DEVNULL)
-    #     time.sleep(2)
-    #     webbrowser.open_new_tab(
-    #         url="http://localhost:6006/#scalars&_smoothingWeight=0.995"
-    #     )
+    def _tensorboard(self, env_name=None):
+        # Kill current session
+        self._tensorboard_kill()
 
-    # def _tensorboard_kill(self):
-    #     print("Closing current session of tensorboard.")
-    #     os.system("taskkill /f /im  tensorboard.exe")
+        # Open the dir of the current env
+        cmd = "tensorboard --logdir " + self._env_path #used to be tensorboard.exe --logdir " + ...
+        print("Launching tensorboard at {}".format(self._env_path))
+        DEVNULL = open(os.devnull, "wb")
+        subprocess.Popen(cmd, shell=True, stdout=DEVNULL, stderr=DEVNULL)
+        time.sleep(2)
+        webbrowser.open_new_tab(
+            url="http://localhost:6006/#scalars&_smoothingWeight=0.995"
+        )
+
+    def _tensorboard_kill(self):
+        print("Closing current session of tensorboard.")
+        os.system("taskkill /f /im  tensorboard.exe")
 
     def _check_env_status(self):
         """

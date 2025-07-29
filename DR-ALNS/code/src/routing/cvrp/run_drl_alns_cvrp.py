@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, 'C:/Users/10133/Desktop/DR-ALNS-master/DR-ALNS-master/code/src')  # 替换为你的本地项目路径
 
-from rl.environments.cvrp_AlnsEnv_LSA1 import cvrpAlnsEnv_LSA1
+from rl.environments.cvrpAlnsEnv_LSA1 import cvrpAlnsEnv_LSA1
 import helper_functions
 
 from stable_baselines3 import PPO

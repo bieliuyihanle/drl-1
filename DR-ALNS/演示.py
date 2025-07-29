@@ -111,8 +111,9 @@ if __name__ == '__main__':
     a = [[2,3,4,5],[2]]
     flattened_new_routes = [customer for route in a for customer in route]
     unvisited_customers = [customer for customer in unvisited_customers if customer not in flattened_new_routes]
-    print(unvisited_customers)
-
+    route = ['D0', 'C1', 'C4', 'C3', 'C2', 'C5', 'S1', 'C6', 'C7', 'D0']
+    print(route[1:-1])
+    print(route[1:-2])
     # 验证
     print("节点顺序:", nodes)
     print("C1 属性:", tasks_info['C1'])

@@ -216,9 +216,7 @@ def is_complete(route, tasks_info):
 def tw_constraint_violated(route, tasks_info, distance_matrix, tank_capacity, now_energy,
                             fuel_consumption_rate, charging_rate, velocity, load_capacity):
     elapsed_time = tasks_info[route[0]]['call-time']
-
     for i in range(1, len(route)):
-        # print(route[i])
         elapsed_time += distance_matrix[route[i - 1]][route[i]] / velocity
         if elapsed_time > tasks_info[route[i]]['Due-Date']:
             return True
@@ -348,7 +346,7 @@ def remove_charging_station(route, tasks_info):
 
 def need_charge(route, distance_matrix, now_energy, fuel_consumption_rate, tank_capacity):
     dist = calculate_route_distance(route, distance_matrix)
-    print(dist)
+    # print(dist)
     return now_energy - calculate_route_distance(route, distance_matrix) * fuel_consumption_rate < 0.2 * tank_capacity
 
 
@@ -562,6 +560,25 @@ def calculate_route_cost(route, tasks_info, distance_matrix, tank_capacity, now_
                 time_cost += tasks_info[route[i]]['Due-Date']-arrival_times[i-1]
             # print(time_cost)
         route_cost = dist_cost + 0.1 * time_cost + 1000
+
+    return route_cost
+
+
+def calculate_nc_route_cost(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    dist_cost = calculate_route_distance(route, distance_matrix)
+    # print(dist_cost)
+    arrival_times = calculate_arrival_times(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                            fuel_consumption_rate, charging_rate, velocity)
+    time_cost = 0
+    for i in range(1, len(route)):
+        # print(route[i])
+        if tasks_info[route[i]]['Type'] == 'c':
+            time_cost += tasks_info[route[i]]['Due-Date']-arrival_times[i-1]
+        # print(time_cost)
+        elif tasks_info[route[i]]['Type'] == 'f':
+            time_cost += 0
+    route_cost = dist_cost + 0.1 * time_cost
 
     return route_cost
 

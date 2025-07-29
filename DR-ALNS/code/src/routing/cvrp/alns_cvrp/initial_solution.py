@@ -3,7 +3,6 @@ sys.path.insert(0, 'C:/Users/10133/Desktop/DR-ALNS-master/DR-ALNS/code/src')
 from routing.cvrp.alns_cvrp import cvrp_helper_functions
 import random
 
-
 # --- init solution ---
 def compute_initial_solution(current, random_state):
     cust = [c[0] for c in current.customers]
@@ -13,7 +12,7 @@ def compute_initial_solution(current, random_state):
     current = cvrp_helper_functions.process_route(current, current.nodes, current.tasks_info, current.distance_matrix,
                                        current.tank_capacity, current.now_energy,current.fuel_consumption_rate,
                                        current.charging_rate, current.velocity, current.load_capacity)
-    print(current.routes)
+    # print(current.routes)
     # routes = []
     # route = []
     # unvisited_customers = [i for i in range(1, current.customers + 1)]
