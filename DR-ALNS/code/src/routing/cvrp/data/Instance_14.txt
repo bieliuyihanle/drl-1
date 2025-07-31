@@ -1,0 +1,22 @@
+StringID       Type          x          y  stock-at-call-time  call-time   Due-Date  Service-Time
+        D0          d        0.0        0.0                 0.0            350.0       1236.0            0.0
+        S0          f        0.0        8.8                 0.0              0.0       1000.0              0.0
+        S1          f       33.0       88.0                 0.0              0.0       1236.0            0.0
+        S2          f       33.0        8.8                 0.0              0.0       1236.0              0.0
+        C1         c        5.5        26.4              30.0              14.0       674.0              15.0      
+        C2         c        11.0       70.4              30.0              70.0       730.0              15.0      
+        C3         c        55.0       79.2              30.0              97.0       757.0              15.0      
+        C4         c        27.5       26.4              30.0              115.0      775.0              15.0      
+        C5         c        27.5       70.4              30.0              136.0      796.0              15.0      
+        C6         c        5.5        52.8              30.0              190.0      850.0              15.0      
+        C7         c        38.5       88.0              30.0              230.0      890.0              15.0      
+        C8         c        5.5        17.6              30.0              263.0      923.0              15.0      
+        C9         c        38.5       61.6              30.0              310.0      970.0              15.0      
+        C10        c        22.0       44.0              30.0              348.0      1008.0             15.0      
+
+Q Vehicle fuel tank capacity /1500/
+e Vehicle now fuel tank capacity /700/
+C Vehicle load capacity /250.0/
+r fuel consumption rate /1.0/
+g inverse refueling rate /0.1/
+v average Velocity /1.0/

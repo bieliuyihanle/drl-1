@@ -140,7 +140,7 @@ class cvrpAlnsEnv_LSA1(Env):
         self.dr_alns.add_destroy_operator(random_route_removal)
         self.dr_alns.add_destroy_operator(least_cus_route_removal)
 
-        # self.dr_alns.add_repair_operator(random_repair)
+        self.dr_alns.add_repair_operator(random_repair)
         self.dr_alns.add_repair_operator(time_based_repair)
         self.dr_alns.add_repair_operator(regret_2_insertion)
         self.dr_alns.add_repair_operator(regret_3_insertion)

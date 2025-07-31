@@ -24,7 +24,7 @@ main:
 
     model: PPO
     policy: ActorCriticPolicy
-    n_workers: 10      # Parallel environments
+    n_workers: 2      # Parallel environments
     n_steps: 2000000    # Steps to train
     save_every: 200000 # Save a checkpoint of the model every n steps (must be divisible by n_workers!)
     eval_callback: false
