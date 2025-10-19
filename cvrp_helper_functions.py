@@ -1,0 +1,804 @@
+import re
+import pandas as pd
+import sys
+import math
+import random
+import numpy as np
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from pathlib import Path
+
+def read_elem(filename):
+    with open(filename) as f:
+        return [str(elem) for elem in f.read().split()]
+
+
+# def read_input_cvrp(filename, instance_nr):
+#     data = pd.read_pickle(filename)
+#     depot_x = data[instance_nr][0][0]
+#     depot_y = data[instance_nr][0][1]
+#     customers_x = [x for x,y in data[instance_nr][1]]
+#     customers_y = [y for x,y in data[instance_nr][1]]
+#     demands = data[instance_nr][2]
+#     capacity = data[instance_nr][3]
+#
+#     distance_matrix = compute_distance_matrix(customers_x, customers_y)
+#     distance_depots = compute_distance_depots(depot_x, depot_y, customers_x, customers_y)
+#
+#     return len(demands), capacity, distance_matrix, distance_depots, demands
+# def list_problem_files(folder: str) -> List[str]:
+#     """Return all txt instance files inside ``folder``."""
+#     folder_path = Path(folder)
+#     files = sorted(str(p) for p in folder_path.glob("*.txt"))
+#     return files
+
+
+def list_problem_files(folder: str) -> List[str]:
+    """
+    返回指定文件夹中所有的 .txt 实例文件。
+    文件列表会根据文件名中的数字进行正确的数值排序。
+    例如：instance_1.txt, instance_2.txt, ..., instance_10.txt
+    """
+    folder_path = Path(folder)
+
+    # 1. 获取所有 .txt 文件的 Path 对象列表
+    # 使用 list() 预先收集所有文件，避免迭代器问题
+    files_as_paths = list(folder_path.glob("*.txt"))
+
+    # 2. 定义一个辅助函数，用于从路径对象中提取文件名中的数字
+    def get_number_from_path(path_obj: Path) -> int:
+        """从文件名（如 'Instance_10.txt'）中提取数字（如 10）"""
+        # re.search(r'\d+', ...) 会在字符串中查找一个或多个连续的数字
+        match = re.search(r'\d+', path_obj.name)
+
+        # 如果找到了数字
+        if match:
+            # match.group(0) 返回找到的数字字符串（如 '10'）
+            # int() 将其转换为整数（如 10）
+            return int(match.group(0))
+
+        # 如果文件名中没有数字，返回一个极大值，让它排在最后面，以防出错
+        return float('inf')
+
+    # 3. 使用这个辅助函数作为 sorted 的 key，对文件路径列表进行排序
+    sorted_files_as_paths = sorted(files_as_paths, key=get_number_from_path)
+
+    # 4. 将排序好的 Path 对象列表转换回字符串路径列表并返回
+    return [str(p) for p in sorted_files_as_paths]
+
+
+def _parse_energy_values(raw_value: str) -> Union[float, List[float]]:
+    """Parse the energy configuration value which may contain multiple entries."""
+
+    cleaned = raw_value.replace(';', ',')
+    values = [float(value.strip()) for value in cleaned.split(',') if value.strip()]
+
+    if not values:
+        raise ValueError("No initial energy values provided in instance file.")
+
+    if len(values) == 1:
+        return values[0]
+
+    return values
+
+
+def get_vehicle_energy(now_energy, route_idx: int, default: Optional[float] = None) -> float:
+    """Return the initial energy for the vehicle assigned to ``route_idx``.
+
+    ``now_energy`` can be a scalar, a list/tuple, a numpy array or a dictionary. If the
+    requested index is not available, fall back to ``default`` when provided.
+    """
+
+    if isinstance(now_energy, dict):
+        if route_idx in now_energy:
+            return now_energy[route_idx]
+        if "default" in now_energy:
+            return now_energy["default"]
+        if now_energy:
+            return next(iter(now_energy.values()))
+
+    if isinstance(now_energy, (list, tuple, np.ndarray)):
+        if route_idx < len(now_energy):
+            return now_energy[route_idx]
+        if len(now_energy) > 0:
+            return now_energy[-1]
+
+    if now_energy is None:
+        if default is None:
+            raise ValueError(f"No energy value available for vehicle index {route_idx}.")
+        return default
+
+    return float(now_energy)
+
+
+def compute_remaining_energies(
+        routes: Sequence[Sequence[Any]],
+        tasks_info,
+        distance_matrix,
+        tank_capacity,
+        now_energy,
+        fuel_consumption_rate,
+        charging_rate,
+        velocity,
+) -> List[float]:
+    """Return the remaining energy for each vehicle after completing its route."""
+
+    energies: List[float] = []
+
+    for idx, route in enumerate(routes):
+        vehicle_energy = get_vehicle_energy(now_energy, idx, tank_capacity)
+        remaining = calculate_remaining_tank1(
+            route,
+            tasks_info,
+            distance_matrix,
+            tank_capacity,
+            vehicle_energy,
+            fuel_consumption_rate,
+        )
+        energies.append(float(remaining))
+
+    return energies
+
+
+def load_problem_instance(file):
+    with (open(file) as f):
+        f.readline()  # ignore header
+
+        target_line = f.readline()
+
+        customers = []
+        fuel_stations = []
+        depot = None
+
+        while target_line != '\n':
+            stl = target_line.split()  # splitted target_line
+            idx = int(stl[0][1:])
+
+            new_target = [stl[0], idx, float(stl[2]), float(stl[3]), int(float(stl[4])),
+                          int(float(stl[5])), int(float(stl[6])), int(float(stl[7]))]
+
+            if stl[1] == 'd':
+                depot = new_target
+            elif stl[1] == 'f':
+                fuel_stations.append(new_target)
+            elif stl[1] == 'c':
+                customers.append(new_target)
+
+            target_line = f.readline()
+
+        configuration_line = f.readline()
+        tank_capacity = float(configuration_line.split('/')[1])  # q Vehicle fuel tank capacity
+
+        configuration_line = f.readline()
+        now_energy_raw = configuration_line.split('/')[1]  # e Vehicle now fuel tank capacity
+        now_energy = _parse_energy_values(now_energy_raw)
+
+        configuration_line = f.readline()
+        load_capacity = float(configuration_line.split('/')[1])  # C Vehicle load capacity
+
+        configuration_line = f.readline()
+        fuel_consumption_rate = float(configuration_line.split('/')[1])  # r fuel consumption rate
+
+        configuration_line = f.readline()
+        charging_rate = float(configuration_line.split('/')[1])  # g inverse refueling rate
+
+        configuration_line = f.readline()
+        velocity = float(configuration_line.split('/')[1])  # v average Velocity
+
+        nodes, tasks_info = build_tasks_info(depot, customers, fuel_stations)
+        distance_matrix = compute_dist_matrix(nodes, tasks_info)
+
+        return tank_capacity, now_energy, load_capacity, fuel_consumption_rate, charging_rate, velocity, depot, \
+               customers, fuel_stations, nodes, tasks_info, distance_matrix
+
+
+def build_tasks_info(
+        depot: List[Any],
+        customers: List[List[Any]],
+        fuel_stations: List[List[Any]]
+) -> Tuple[List[str], Dict[str, Dict[str, Any]]]:
+    """
+    构建任务信息字典和节点名称列表
+
+    返回：
+      - nodes: 按顺序的节点名称列表
+      - tasks_info: { name -> 属性字典 }
+    """
+    tasks_info: Dict[str, Dict[str, Any]] = {}
+
+    # depot
+    tasks_info[depot[0]] = {
+        'Type': 'd',
+        'x': depot[2],
+        'y': depot[3],
+        'stock-at-call-time': depot[4],
+        'call-time': depot[5],
+        'Due-Date': depot[6],
+        'Service-Time': depot[7],
+    }
+
+    # customers
+    for c in customers:
+        tasks_info[c[0]] = {
+            'Type': 'c',
+            'x': c[2],
+            'y': c[3],
+            'stock-at-call-time': c[4],
+            'call-time': c[5],
+            'Due-Date': c[6],
+            'Service-Time': c[7],
+        }
+
+    # fuel stations
+    for s in fuel_stations:
+        tasks_info[s[0]] = {
+            'Type': 'f',
+            'x': s[2],
+            'y': s[3],
+            'stock-at-call-time': s[4],
+            'call-time': s[5],
+            'Due-Date': s[6],
+            'Service-Time': s[7],
+        }
+
+    # 保证顺序：depot, customers..., stations...
+    nodes = [depot[0]] + [c[0] for c in customers] + [s[0] for s in fuel_stations]
+    return nodes, tasks_info
+
+
+def compute_dist_matrix(
+        nodes: List[str],
+        tasks_info: Dict[str, Dict[str, Any]]
+) -> Dict[str, Dict[str, float]]:
+    """
+    根据 nodes 顺序和 tasks_info 中的 (x,y)，计算 dict-of-dict 格式的距离矩阵
+    """
+    N = len(nodes)
+    # 先提取按顺序的坐标元组列表
+    coords = [(tasks_info[name]['x'], tasks_info[name]['y']) for name in nodes]
+
+    # 初始化 raw_dist
+    raw = [[0.0] * N for _ in range(N)]
+    for i in range(N):
+        xi, yi = coords[i]
+        for j in range(i + 1, N):
+            xj, yj = coords[j]
+            d = abs(xi - xj) + abs(yi - yj)
+            raw[i][j] = raw[j][i] = d
+
+    # 转成更易用的 dict-of-dict
+    dist_matrix: Dict[str, Dict[str, float]] = {
+        u: {v: raw[i][j] for j, v in enumerate(nodes)}
+        for i, u in enumerate(nodes)
+    }
+    return dist_matrix
+
+
+# Compute the distance matrix
+# def compute_distance_matrix(depot, customers, fuel_stations):
+#     customers_id = [a[0] for a in customers]
+#     fuel_stations_id = [b[0] for b in fuel_stations]
+#     nodes = [depot[0]] + customers_id + fuel_stations_id
+#
+#     nb_customers = len(customers)
+#     distance_matrix = np.zeros((nb_customers, nb_customers))
+#     for i in range(nb_customers):
+#         distance_matrix[i][i] = 0
+#         for j in range(nb_customers):
+#             dist = compute_dist(customers[i][2], customers[j][2], customers[i][3], customers[j][3])
+#             distance_matrix[i][j] = dist
+#             distance_matrix[j][i] = dist
+#     return distance_matrix
+
+
+def is_nc_feasible(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    if tw_constraint_violated(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+        return False
+    elif payload_capacity_constraint_violated(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+        return False
+    else:
+        return True
+
+
+def is_feasible(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    if tw_constraint_violated(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+        return False
+    elif tank_capacity_constraint_violated(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+        return False
+    elif payload_capacity_constraint_violated(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+        return False
+    else:
+        return True
+
+
+def is_complete(route, tasks_info):
+    return tasks_info[route[0]]['Type'] == 'd' and tasks_info[route[-1]]['Type'] == 'd' \
+            and all(tasks_info[node]['Type'] != 'd' for node in route[1:-1])
+
+
+def tw_constraint_violated(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    elapsed_time = tasks_info[route[0]]['call-time']
+    for i in range(1, len(route)):
+        elapsed_time += distance_matrix[route[i - 1]][route[i]] / velocity
+        if elapsed_time > tasks_info[route[i]]['Due-Date']:
+            return True
+
+        if tasks_info[route[i]]['Type'] == 'f':
+            missing_energy = tank_capacity - calculate_remaining_tank(route, tasks_info, distance_matrix,
+                                                                      tank_capacity, now_energy,
+                                                                      fuel_consumption_rate, until=route[i])
+            tasks_info[route[i]]['Service-Time'] = missing_energy * charging_rate
+
+        elapsed_time += tasks_info[route[i]]['Service-Time']
+
+    return False
+
+
+def payload_capacity_constraint_violated(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                         fuel_consumption_rate, charging_rate, velocity, load_capacity):
+
+    total_demand = calculate_total_load(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                         fuel_consumption_rate, charging_rate, velocity)
+
+    return total_demand > load_capacity
+
+
+def tank_capacity_constraint_violated(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    last = None
+
+    for t in route:
+        if last is not None:
+            consumption = distance_matrix[last][t] * fuel_consumption_rate
+            now_energy -= consumption
+
+            if now_energy < 0:
+                return True
+
+            if tasks_info[t]['Type'] == 'f':
+                now_energy = tank_capacity
+        last = t
+
+    return False
+
+
+def calculate_arrival_times(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity):
+    elapsed_time = tasks_info['D0']['call-time']
+    last = None
+    arrival_times = [elapsed_time]
+
+    for i in route:
+        if last is not None:
+            travel_time = distance_matrix[last][i] / velocity
+            elapsed_time += travel_time
+
+
+            # 记录当前节点的实际到达时间
+            arrival_times.append(elapsed_time)
+
+            if tasks_info[i]['Type'] == 'f':
+                missing_energy = tank_capacity - calculate_remaining_tank(route, tasks_info, distance_matrix,
+                                                                          tank_capacity, now_energy,
+                                                                          fuel_consumption_rate, until=i)
+                tasks_info[i]['Service-Time'] = missing_energy * charging_rate
+
+            elapsed_time += tasks_info[i]['Service-Time']
+
+        last = i
+    return arrival_times
+
+
+def calculate_remaining_tank1(route, tasks_info, distance_matrix, tank_capacity, now_energy, fuel_consumption_rate,
+                             until=None):
+    last = None
+    # now_energy = float(now_energy)
+    now_energy = now_energy
+    total_consumption = 0
+    for t in route:
+        if last is not None:
+            distance = distance_matrix[last][t]
+            consumption = distance * fuel_consumption_rate
+            # total_consumption += consumption
+            now_energy -= consumption
+
+            if tasks_info[t]['Type'] == 'f':
+                now_energy = tank_capacity
+
+            if until == t:
+                return now_energy
+            print(now_energy)
+        last = t
+        # print(total_consumption)
+    return now_energy
+
+
+def calculate_remaining_tank(route, tasks_info, distance_matrix, tank_capacity, now_energy, fuel_consumption_rate,
+                             until=None):
+    last = None
+    # now_energy = float(now_energy)
+    now_energy = now_energy
+    total_consumption = 0
+    for t in route:
+        if last is not None:
+            distance = distance_matrix[last][t]
+            consumption = distance * fuel_consumption_rate
+            # total_consumption += consumption
+            now_energy -= consumption
+
+            if tasks_info[t]['Type'] == 'f':
+                now_energy = tank_capacity
+
+            if until == t:
+                return now_energy
+
+        last = t
+        # print(total_consumption)
+    return now_energy
+
+
+def calculate_demand(route, tasks_info, distance_matrix, tank_capacity, now_energy, fuel_consumption_rate,
+                     charging_rate, velocity):
+    arrival_times = calculate_arrival_times(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity)
+    demand = []
+
+    for i in range(len(route)):
+        if tasks_info[route[i]]['Type'] == 'f':
+            tasks_demand = 0
+            demand.append(tasks_demand)
+        elif tasks_info[route[i]]['Type'] == 'c':
+            tasks_demand = (48 - tasks_info[route[i]]['stock-at-call-time'] + (arrival_times[i] -
+                                                                             tasks_info[route[i]]['call-time']) / 30) * 0.75
+            demand.append(tasks_demand)
+        elif tasks_info[route[i]]['Type'] == 'd':
+            tasks_demand = 0
+            demand.append(tasks_demand)
+    return demand
+
+
+def calculate_total_load(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                         fuel_consumption_rate, charging_rate, velocity):
+    demand = calculate_demand(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                              fuel_consumption_rate, charging_rate, velocity)
+
+    total_demand = sum(demand)
+    return total_demand
+
+
+def remove_charging_station(route, tasks_info):
+    route[:] = [node for node in route if tasks_info[node]['Type'] != 'f']
+    return route
+
+
+def need_charge(route, distance_matrix, now_energy, fuel_consumption_rate, tank_capacity):
+    dist = calculate_route_distance(route, distance_matrix)
+    # print(dist)
+    return now_energy - dist * fuel_consumption_rate < 0.2 * tank_capacity
+
+
+def calculate_route_distance(route, distance_matrix):
+    dist = 0
+    last = None
+    for r in route:
+        if last is not None:
+            dist += distance_matrix[last][r]
+        last = r
+    return dist
+
+
+def get_reachable_charging_stations(route, nodes, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                    fuel_consumption_rate, until = None) -> list:
+    capacity = calculate_remaining_tank(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                        fuel_consumption_rate, until)
+    max_dist = capacity / fuel_consumption_rate
+    reachable_stations = []
+
+    charging_stations = [n for n in nodes if tasks_info[n]['Type'] == 'f']
+    for cs in charging_stations:
+        if distance_matrix[cs][until] <= max_dist:
+            reachable_stations.append(cs)
+
+    return reachable_stations
+
+
+def find_optimal_charging_station_insertion(route, nodes, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    # print(route)
+    best_insertion_point = None
+    best_station = None
+    min_route_cost = float('inf')
+
+    for i in range(1, len(route)):
+        if tasks_info[route[i]]['Type'] != 'f':
+            reachable_stations = get_reachable_charging_stations(route[:i], nodes, tasks_info, distance_matrix,
+                                                                 tank_capacity, now_energy, fuel_consumption_rate,
+                                                                 until=route[i])
+            if reachable_stations is None:
+                continue
+
+            else:
+                for j in reachable_stations:
+                    temp_route = route[:i] + [j] + route[i:]
+
+                    # 判断插入后路径是否可行
+                    if is_feasible(temp_route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+
+                        # 计算插入后的总成本
+                        route_cost = calculate_route_cost(temp_route, tasks_info, distance_matrix, tank_capacity,
+                                                          now_energy, fuel_consumption_rate, charging_rate, velocity,
+                                                          load_capacity)
+                        # Tr = self.calculate_arrival_times(temp_route)
+                        # print(Tr)
+                        # print(temp_route)
+                        # print(route_cost)
+                        # 更新最优插入点和总成本
+                        if route_cost < min_route_cost:
+                            min_route_cost = route_cost
+                            best_insertion_point = i
+                            best_station = j
+    # print(best_insertion_point, best_station, min_route_cost)
+    return best_insertion_point, best_station, min_route_cost
+
+
+def make_route_feasible_and_best(route, nodes, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    best_insertion_point, best_station, min_route_cost = find_optimal_charging_station_insertion(route, nodes, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                            fuel_consumption_rate, charging_rate, velocity, load_capacity)
+    if best_station == None:
+        return None
+    best_feasible_route = route[:best_insertion_point]+[best_station]+route[best_insertion_point:]
+
+    # print(best_feasible_route)
+    if not is_feasible(best_feasible_route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+        # print("NO")
+        return None
+    else:
+        # print("YES")
+        # print(best_feasible_route)
+        return best_feasible_route
+
+
+def process_route(state, nodes, tasks_info, distance_matrix, tank_capacity, now_energy,
+                  fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    unvisited_customers = []
+
+    for idx, value in enumerate(state.routes):
+        vehicle_energy = get_vehicle_energy(now_energy, idx, tank_capacity)
+        # 判断当前路径是否需要充电
+        while need_charge(state.routes[idx], distance_matrix, vehicle_energy, fuel_consumption_rate, tank_capacity):
+
+            k = make_route_feasible_and_best(value, nodes, tasks_info, distance_matrix, tank_capacity, vehicle_energy,
+                                             fuel_consumption_rate, charging_rate, velocity, load_capacity)
+            if k is not None:
+                # 找到可行的插入点，更新路径
+                state.routes[idx] = k
+                break  # 找到充电位置，跳出while循环，继续下一条路径
+            else:
+                # 找不到插入点，移除最小到达时间的客户点
+                earliest_customer = find_earliest_customer(state.routes[idx], tasks_info)
+                state.routes[idx].remove(earliest_customer)    # 从当前路径中移除
+                unvisited_customers.append(earliest_customer)  # 将该客户点标记为未访问
+                # 路径调整后，继续判断是否需要充电
+    while unvisited_customers:
+        # print("Current unvisited_customers:", unvisited_customers)
+
+        # 使用k-最近邻域启发式为未访问的客户生成新的路径
+        new_routes = innh(unvisited_customers, tasks_info, distance_matrix, tank_capacity, now_energy,
+                          fuel_consumption_rate, charging_rate, velocity, load_capacity, k=3,
+                          start_idx=len(state.routes))
+        unvisited_customers = []
+        # print(new_routes)
+        # 对新的路径进行充电站插入操作
+        for idx, value in enumerate(new_routes):
+            route_idx = len(state.routes) + idx
+            vehicle_energy = get_vehicle_energy(now_energy, route_idx, tank_capacity)
+            # print(value)
+            # print(self.need_charge(value))
+            while need_charge(value, distance_matrix, vehicle_energy, fuel_consumption_rate, tank_capacity):
+                k = make_route_feasible_and_best(value, nodes, tasks_info, distance_matrix, tank_capacity,
+                                                 vehicle_energy,
+                                                 fuel_consumption_rate, charging_rate, velocity, load_capacity)
+                if k is not None:
+                    new_routes[idx] = k
+                    break
+                else:
+                    earliest_customer = find_earliest_customer(new_routes[idx], tasks_info)
+                    new_routes[idx].remove(earliest_customer)
+                    unvisited_customers.append(earliest_customer)
+
+        # 展开 new_routes，将其转化为单个客户的列表
+        flattened_new_routes = [customer for route in new_routes for customer in route]
+        # print(flattened_new_routes)
+        # 更新 unvisited_customers 列表，确保未服务的客户仍然保留
+
+        unvisited_customers = [customer for customer in unvisited_customers if customer not in flattened_new_routes]
+
+        # print("11111111Current unvisited_customers:", unvisited_customers)
+        state.routes.extend(new_routes)
+    # print("22222222222222")
+    return state
+
+
+def innh(customers, tasks_info, distance_matrix, tank_capacity, now_energy,
+         fuel_consumption_rate, charging_rate, velocity, load_capacity, k=3, start_idx=0):
+    giant_route = []
+    serviced_customers = set()
+    unserved_customers = customers.copy()
+
+    while unserved_customers:
+        route_idx = start_idx + len(giant_route)
+        vehicle_energy = get_vehicle_energy(now_energy, route_idx, tank_capacity)
+        route = ['D0']
+        last_position = 'D0'
+
+        while unserved_customers:
+            possible_successors = [customer for customer in unserved_customers if customer not in serviced_customers]
+            possible_successors.sort(key=lambda n: distance_matrix[last_position][n])
+            possible_successors = possible_successors[:k]
+            if not possible_successors:
+                break
+            successor = min(possible_successors, key=lambda n: tasks_info[n]['Due-Date'])
+            route.append(successor)
+            # demand = route.calculate_demand()
+            if not is_nc_feasible(route, tasks_info, distance_matrix, tank_capacity, vehicle_energy,
+                                  fuel_consumption_rate, charging_rate, velocity, load_capacity):
+                route.pop()
+                break
+            serviced_customers.add(successor)
+            unserved_customers.remove(successor)
+            last_position = successor
+        route.append('D0')
+        if len(route) > 1:
+            giant_route.append(route)
+            unserved_customers = [customer for customer in unserved_customers if customer not in serviced_customers]
+
+    return giant_route
+
+
+def find_earliest_customer(route, tasks_info):
+    # 假设每个客户点包含属性 'due_date'
+    # 返回路径中 due_date 最小的客户点
+    earliest_customer = None
+    min_due_date = float('inf')
+
+    for v in route:
+        if tasks_info[v]['Type'] == 'c':
+            if tasks_info[v]['Due-Date'] < min_due_date:
+                min_due_date = tasks_info[v]['Due-Date']
+                earliest_customer = v
+
+    return earliest_customer
+
+
+def calculate_route_cost(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                         fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    route_cost = 0
+    if not is_feasible(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                       fuel_consumption_rate, charging_rate, velocity, load_capacity):
+        route_cost = float('inf')
+    else:
+        dist_cost = calculate_route_distance(route, distance_matrix)
+        # print(dist_cost)
+        arrival_times = calculate_arrival_times(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                                fuel_consumption_rate, charging_rate, velocity)
+        time_cost = 0
+        for i in range(1, len(route)):
+            # print(route[i])
+            if tasks_info[route[i]]['Type'] == 'f':
+                time_cost += 0
+            elif tasks_info[route[i]]['Type'] == 'c':
+                time_cost += tasks_info[route[i]]['Due-Date']-arrival_times[i]
+            # print(time_cost)
+        route_cost = dist_cost + 0.1 * time_cost + 1000
+
+    return route_cost
+
+
+def calculate_nc_route_cost(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    dist_cost = calculate_route_distance(route, distance_matrix)
+    # print(dist_cost)
+    arrival_times = calculate_arrival_times(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                                            fuel_consumption_rate, charging_rate, velocity)
+    time_cost = 0
+    for i in range(1, len(route)):
+        # print(route[i])
+        if tasks_info[route[i]]['Type'] == 'c':
+            time_cost += tasks_info[route[i]]['Due-Date']-arrival_times[i]
+        # print(time_cost)
+        elif tasks_info[route[i]]['Type'] == 'f':
+            time_cost += 0
+    route_cost = dist_cost + 0.1 * time_cost
+
+    return route_cost
+
+
+def get_nb_trucks(filename):
+    begin = filename.rfind("-k")
+    if begin != -1:
+        begin += 2
+        end = filename.find(".", begin)
+        return int(filename[begin:end])
+    print("Error: nb_trucks could not be read from the file name. Enter it from the command line")
+    sys.exit(1)
+
+
+def compute_route_load(route, demands_data):
+    load = 0
+    for i in route:
+        load += demands_data[i - 1]
+    return load
+
+
+def get_customers_that_can_be_added_to_route(route_load, truck_capacity, unvisited_customers, demands_data):
+    unvisited_edgible_customers = []
+    for customer in unvisited_customers:
+        if route_load + demands_data[customer - 1] <= truck_capacity:
+            unvisited_edgible_customers.append(customer)
+    return unvisited_edgible_customers
+
+
+def get_closest_customer_to_add(route, unvisited_edgible_customers, dist_matrix_data, dist_depot_data):
+    current_node = route[-1]
+    distances = [dist_matrix_data[current_node - 1][unvisited_node - 1] for unvisited_node in
+                 unvisited_edgible_customers]
+    closest_customer = unvisited_edgible_customers[
+        pd.Series(distances).idxmin()]  # NOTE: no -1 because this is an index, not an id
+    return closest_customer
+
+
+def cost_routes(routes, dist_matrix_data, distance_depot_data):
+    cost = 0
+    for route in routes:
+        cost += distance_depot_data[route[0] - 1] + distance_depot_data[route[-1] - 1]
+        for i in range(len(route) - 1):
+            cost += dist_matrix_data[route[i] - 1][route[i + 1] - 1]
+    return cost
+
+
+def determine_nr_nodes_to_remove(nb_customers, omega_bar_minus=5, omega_minus=0.1, omega_bar_plus=50, omega_plus=0.4):
+    n_plus = min(omega_bar_plus, omega_plus * nb_customers)
+    n_minus = min(n_plus, max(omega_bar_minus, omega_minus * nb_customers))
+    r = random.randint(round(n_minus), round(n_plus))
+    return r
+
+
+def NormalizeData(data):
+    return (data - np.min(data)) / (np.max(data) - np.min(data))
+
+
+def update_neighbor_graph(current, new_routes, new_routes_quality):
+    for route in new_routes:
+        prev_node = 0
+        for i in range(len(route)):
+            curr_node = route[i]
+            prev_edge_weight = current.graph.get_edge_weight(prev_node, curr_node)
+            if new_routes_quality < prev_edge_weight:
+                current.graph.update_edge(prev_node, curr_node, new_routes_quality)
+            prev_node = curr_node
+        prev_edge_weight = current.graph.get_edge_weight(prev_node, 0)
+        if new_routes_quality < prev_edge_weight:
+            current.graph.update_edge(prev_node, 0, new_routes_quality)
+    return current.graph
+
+
+class NeighborGraph:
+    def __init__(self, num_nodes):
+        self.graph = np.full((num_nodes + 1, num_nodes + 1), np.inf, dtype=np.float64)
+
+    def update_edge(self, node_a, node_b, cost):
+        # graph is kept single directional
+        self.graph[node_a][node_b] = cost
+
+    def get_edge_weight(self, node_a, node_b):
+        return self.graph[node_a][node_b]
