@@ -343,13 +343,13 @@ def run_algo_for_instance(instance_file: str, model, iterations: int, rseed: int
 
     env = cvrpAlnsEnv_LSA1(parameters)
 
-    objective_history = env.run_time_limit(model)
-
+    objective_history, rb = env.run_time_limit(model)
+    print(env.best_solution.routes)
     best_objective = env.best_solution.objective()
 
     print(f"  - 处理完成: {instance_name}, 最优目标值: {best_objective}")
 
-    return instance_name, best_objective, objective_history
+    return instance_name, best_objective, objective_history,rb
 
 # # 收敛曲线
 # def main(param_file=PARAMETERS_FILE):
@@ -452,12 +452,14 @@ def main(param_file=PARAMETERS_FILE):
             print(f"  - 第 {run_num}/{num_runs} 次运行...")
 
             # 为当前实例运行一次算法
-            _, best_objective, objective_history = run_algo_for_instance(
+            _, best_objective, objective_history, rb = run_algo_for_instance(
                 instance_file=instance_file_path,
                 model=model,
                 iterations=iterations,
                 rseed=seed + run_num  # 每次运行使用不同的随机种子以保证结果差异
             )
+
+            print(rb)
 
             # 5. 解包收敛数据并以标准格式记录
             if objective_history:
