@@ -7,6 +7,7 @@ from routing.cvrp.alns_cvrp import cvrp_helper_functions
 
 # --- random removal ---
 def random_removal(current, random_state, nr_nodes_to_remove=None):
+    # print("random_removal")
     destroyed_solution = copy.deepcopy(current)
 
     for route in destroyed_solution.routes:
@@ -32,6 +33,7 @@ def random_removal(current, random_state, nr_nodes_to_remove=None):
     return destroyed_solution
 
 def worst_dist_cust_removal(current, random_state, nr_nodes_to_remove=None):
+    # print("worst_dist_cust_removal")
     destroyed_solution = copy.deepcopy(current)
 
     for route in destroyed_solution.routes:
@@ -74,6 +76,7 @@ def cal_cust_cost(customer, route, idx, distance_matrix):
 
 
 def worst_time_cust_removal(current, random_state, nr_nodes_to_remove=None):
+    # print("worst_time_cust_removal")
     """
     Removes customers based on the urgency of their time window.
     It prioritizes removing customers with the most slack time (due_date - arrival_time).
@@ -90,11 +93,12 @@ def worst_time_cust_removal(current, random_state, nr_nodes_to_remove=None):
         nr_nodes_to_remove = determine_nr_nodes_to_remove(nb_customers)
 
     time_difference = []
-    for route in destroyed_solution.routes:
+    for route_idx, route in enumerate(destroyed_solution.routes):
+        vehicle_energy = destroyed_solution.get_vehicle_energy(route_idx)
         arrival_times = cvrp_helper_functions.calculate_arrival_times(
                     route,
                     current.tasks_info, current.distance_matrix,
-                    current.tank_capacity, current.now_energy,
+                    current.tank_capacity, vehicle_energy,
                     current.fuel_consumption_rate, current.charging_rate,
                     current.velocity
                 )
@@ -119,6 +123,7 @@ def worst_time_cust_removal(current, random_state, nr_nodes_to_remove=None):
 
 
 def shaw_destroy(current, random_state, nr_nodes_to_remove=None):
+    # print("shaw_removal")
     """
     Removes a set of "related" or similar customers from the solution.
     This is also known as the Shaw Removal operator.
@@ -212,7 +217,9 @@ def calculate_lij(customer1, customer2, state):
 
 
 def calculate_customer_demand(route, customer, current):
-    arrival_times = cvrp_helper_functions.calculate_arrival_times(route, current.tasks_info, current.distance_matrix, current.tank_capacity, current.now_energy,
+    route_idx = current.routes.index(route)
+    vehicle_energy = current.get_vehicle_energy(route_idx)
+    arrival_times = cvrp_helper_functions.calculate_arrival_times(route, current.tasks_info, current.distance_matrix, current.tank_capacity, vehicle_energy,
                             current.fuel_consumption_rate, current.charging_rate, current.velocity)
     customer_index = route.index(customer)
 
@@ -223,6 +230,7 @@ def calculate_customer_demand(route, customer, current):
 
 
 def proximity_based_removal(current, random_state, nr_nodes_to_remove=None):
+    # print("proximity_based_removal")
     # 1. Safety copy and preparation
     destroyed_solution = copy.deepcopy(current)
 
@@ -279,6 +287,7 @@ def proximity_based_removal(current, random_state, nr_nodes_to_remove=None):
 
 
 def time_based_removal(current, random_state, nr_nodes_to_remove=None):
+    # print("time_based_removal")
     """
     Removes a chain of customers that are close in time.
     It starts with a random customer, then removes the one whose call time is
@@ -319,8 +328,8 @@ def time_based_removal(current, random_state, nr_nodes_to_remove=None):
         # This uses the data-centric 'tasks_info' dictionary directly.
         nearest_time_node = min(
             candidates,
-            key=lambda candidate: abs(current.tasks_info[last_selected_node]['call_time'] -
-                                      current.tasks_info[candidate]['call_time'])
+            key=lambda candidate: abs(current.tasks_info[last_selected_node]['call-time'] -
+                                      current.tasks_info[candidate]['call-time'])
         )
 
         to_remove.append(nearest_time_node)
@@ -341,6 +350,7 @@ def time_based_removal(current, random_state, nr_nodes_to_remove=None):
 
 
 def zone_removal(current_solution, random_state, nr_nodes_to_remove=None, zone_size=30):
+    # print("zone_removal")
     """
     Removes customers that fall within a randomly generated geographic zone.
     The process is repeated with new zones until enough customers are removed.
@@ -413,6 +423,7 @@ def zone_removal(current_solution, random_state, nr_nodes_to_remove=None, zone_s
 
 
 def shortest_route_removal(current, random_state, nr_nodes_to_remove=None):
+    # print("shortest_route_removal")
     """
     Finds the route with the shortest total distance and removes all of its
     customers. This is a "chunk" removal operator designed to escape local optima.
@@ -445,6 +456,7 @@ def shortest_route_removal(current, random_state, nr_nodes_to_remove=None):
 
 
 def least_cus_route_removal(current_solution, random_state, nr_nodes_to_remove=None):
+    # print("least_cus_route_removal")
     destroyed_solution = copy.deepcopy(current_solution)
 
     for route in destroyed_solution.routes:
@@ -463,6 +475,7 @@ def least_cus_route_removal(current_solution, random_state, nr_nodes_to_remove=N
 
 
 def random_route_removal(current_solution, random_state, nr_nodes_to_remove=None):
+    # print("random_route_removal")
     destroyed_solution = copy.deepcopy(current_solution)
 
     for route in destroyed_solution.routes:
@@ -490,6 +503,7 @@ def random_route_removal(current_solution, random_state, nr_nodes_to_remove=None
 
 
 def relatedness_removal(current, random_state, nr_nodes_to_remove=None, prob=5):
+    # print("relatedness_removal")
     destroyed_solution = copy.deepcopy(current)
     visited_customers = [customer for route in destroyed_solution.routes for customer in route]
 

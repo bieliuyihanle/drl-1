@@ -7,7 +7,7 @@ import time
 # --- regret repair
 def get_regret_single_insertion(routes, customer, truck_capacity, distance_matrix_data, distance_depot_data,
                                 demands_data):
-    # print('python repair')
+    # print("get_regret_single_insertion")
     insertions = {}
     for route_idx in range(len(routes)):
         if cvrp_helper_functions.compute_route_load(routes[route_idx], demands_data) + demands_data[customer - 1] <= truck_capacity:
@@ -41,6 +41,7 @@ def get_regret_single_insertion(routes, customer, truck_capacity, distance_matri
 
 
 def regret_insertion(current, rnd_state, prob=1.5, **kwargs):
+    # print("regret_insertion")
     visited_customers = [customer for route in current.routes for customer in route]
     all_customers = set(range(1, current.nb_customers + 1))
     unvisited_customers = all_customers - set(visited_customers)
@@ -69,7 +70,7 @@ def regret_insertion(current, rnd_state, prob=1.5, **kwargs):
 
 
 def random_repair(current, rnd_state, max_attempts=10, **kwargs):
-
+    # print("random_repair")
     """
     Simplified Random Repair operator.
     Randomly inserts unassigned customers into the current solution.
@@ -101,9 +102,10 @@ def random_repair(current, rnd_state, max_attempts=10, **kwargs):
 
             # 创建临时路径以检查可行性
             temp_route = route[:insert_position] + [customer] + route[insert_position:]
+            vehicle_energy = current.get_vehicle_energy(route_index)
 
             if cvrp_helper_functions.is_nc_feasible(temp_route, current.tasks_info, current.distance_matrix,
-                                                    current.tank_capacity, current.now_energy,
+                                                    current.tank_capacity, vehicle_energy,
                                                     current.fuel_consumption_rate, current.charging_rate,
                                                     current.velocity, current.load_capacity):  # 检查可行性
                 current.routes[route_index].insert(insert_position, customer)
@@ -124,6 +126,7 @@ def random_repair(current, rnd_state, max_attempts=10, **kwargs):
 
 
 def time_based_repair(current, rnd_state, max_attempts=5, early_stop_threshold=5, **kwargs):
+    # print("time_based_repair")
     """
     Optimized Time-based Repair operator.
     Inserts unassigned customers into the current solution by considering
@@ -154,11 +157,13 @@ def time_based_repair(current, rnd_state, max_attempts=5, early_stop_threshold=5
 
                 temp_route = route[:insert_position] + [customer] + route[insert_position:]
 
+                vehicle_energy = current.get_vehicle_energy(route_index)
+
                 # 检查能量与时窗可行性
                 if not cvrp_helper_functions.is_nc_feasible(
                     temp_route,
                     current.tasks_info, current.distance_matrix,
-                    current.tank_capacity, current.now_energy,
+                    current.tank_capacity, vehicle_energy,
                     current.fuel_consumption_rate, current.charging_rate,
                     current.velocity, current.load_capacity
                 ):
@@ -168,14 +173,14 @@ def time_based_repair(current, rnd_state, max_attempts=5, early_stop_threshold=5
                 finish_time_before = cvrp_helper_functions.calculate_arrival_times(
                     route,
                     current.tasks_info, current.distance_matrix,
-                    current.tank_capacity, current.now_energy,
+                    current.tank_capacity, vehicle_energy,
                     current.fuel_consumption_rate, current.charging_rate,
                     current.velocity
                 )[-1]
                 finish_time_after = cvrp_helper_functions.calculate_arrival_times(
                     temp_route,
                     current.tasks_info, current.distance_matrix,
-                    current.tank_capacity, current.now_energy,
+                    current.tank_capacity, vehicle_energy,
                     current.fuel_consumption_rate, current.charging_rate,
                     current.velocity
                 )[-1]
@@ -210,6 +215,7 @@ def time_based_repair(current, rnd_state, max_attempts=5, early_stop_threshold=5
 
 
 def regret_2_insertion(current, rnd_state, regret_threshold=float('inf'), **kwargs):
+    # print("regret_2_insertion")
     """
     Regret-2 Insertion operator.
     Inserts the customer whose cost difference between the best and
@@ -267,20 +273,21 @@ def find_best_two_insert_positions(customer, current):
     """
     insertion_costs = []
 
-    for route in current.routes:
+    for route_idx, route in enumerate(current.routes):
+        vehicle_energy = current.get_vehicle_energy(route_idx)
         for i in range(1, len(route)):
             temp_route = route[:i] + [customer] + route[i:]
             if cvrp_helper_functions.is_nc_feasible(
                 temp_route,
                 current.tasks_info, current.distance_matrix,
-                current.tank_capacity, current.now_energy,
+                current.tank_capacity, vehicle_energy,
                 current.fuel_consumption_rate, current.charging_rate,
                 current.velocity, current.load_capacity
             ):
                 cost = cvrp_helper_functions.calculate_nc_route_cost(
                     temp_route,
                     current.tasks_info, current.distance_matrix,
-                    current.tank_capacity, current.now_energy,
+                    current.tank_capacity, vehicle_energy,
                     current.fuel_consumption_rate, current.charging_rate,
                     current.velocity, current.load_capacity
                 )
@@ -297,6 +304,7 @@ def find_best_two_insert_positions(customer, current):
 
 
 def regret_3_insertion(current, rnd_state, regret_threshold=float('inf'), **kwargs):
+    # print("regret_3_insertion")
     """
     Implements the Regret-3 Insertion heuristic.
     Inserts unassigned customers into the current solution based on the
@@ -394,13 +402,14 @@ def find_best_three_insert_positions(customer, current):
     best_position = None
     best_route = None
 
-    for route in current.routes:
+    for route_idx, route in enumerate(current.routes):
+        vehicle_energy = current.get_vehicle_energy(route_idx)
         for i in range(1, len(route)):
             temp_route = route[:i] + [customer] + route[i:]
             if not cvrp_helper_functions.is_nc_feasible(
                 temp_route,
                 current.tasks_info, current.distance_matrix,
-                current.tank_capacity, current.now_energy,
+                current.tank_capacity, vehicle_energy,
                 current.fuel_consumption_rate, current.charging_rate,
                 current.velocity, current.load_capacity
             ):
@@ -409,7 +418,7 @@ def find_best_three_insert_positions(customer, current):
             cost = cvrp_helper_functions.calculate_nc_route_cost(
                 temp_route,
                 current.tasks_info, current.distance_matrix,
-                current.tank_capacity, current.now_energy,
+                current.tank_capacity, vehicle_energy,
                 current.fuel_consumption_rate, current.charging_rate,
                 current.velocity, current.load_capacity
             )
@@ -437,6 +446,7 @@ def find_best_three_insert_positions(customer, current):
 
 
 def greedy_repair(current, rnd_state, **kwargs):
+    # print("greedy_repair")
     """
     Inserts the unassigned customers in the best route. If there are no
     feasible insertions, then a new route is created.
@@ -470,14 +480,15 @@ def best_insert(customer, current):
     best_route = None
     best_idx = None
 
-    for route in current.routes:
+    for route_idx, route in enumerate(current.routes):
+        vehicle_energy = current.get_vehicle_energy(route_idx)
         for idx in range(1, len(route)):
             # 构造临时路径检查可行性
             temp_route = route[:idx] + [customer] + route[idx:]
             if not cvrp_helper_functions.is_nc_feasible(
                 temp_route,
                 current.tasks_info, current.distance_matrix,
-                current.tank_capacity, current.now_energy,
+                current.tank_capacity, vehicle_energy,
                 current.fuel_consumption_rate, current.charging_rate,
                 current.velocity, current.load_capacity
             ):
