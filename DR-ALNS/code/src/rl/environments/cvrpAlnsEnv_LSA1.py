@@ -10,6 +10,7 @@ import numpy as np
 import numpy.random as rnd
 from pathlib import Path
 
+
 import sys
 sys.path.insert(0, 'C:/Users/10133/Desktop/DR-ALNS-master/DR-ALNS/code/src')  # 替换为你的本地项目路径
 
@@ -52,7 +53,8 @@ class cvrpAlnsEnv_LSA1(Env):
         self.instance_folder = str(base_path.joinpath(self.config["instance_folder"]))
         self.instances = cvrp_helper_functions.list_problem_files(self.instance_folder)
 
-        self.instance = None
+        self.instance = self.config['instance_file']
+        # self.instance = None
         self.best_routes = []
 
         self.initial_solution = None
@@ -72,7 +74,7 @@ class cvrpAlnsEnv_LSA1(Env):
         self.max_iterations = self.config["iterations"]  # max number of generations in an episode
 
         # Action and observation spaces
-        self.action_space = gym.spaces.MultiDiscrete([1, 1, 10, 100])
+        self.action_space = gym.spaces.MultiDiscrete([10, 5, 10, 100])
         self.observation_space = gym.spaces.Box(shape=(8,), low=0, high=100, dtype=np.float64)
 
     def make_observation(self):
@@ -104,7 +106,7 @@ class cvrpAlnsEnv_LSA1(Env):
         self.rnd_state = rnd.RandomState(SEED)
 
         # —— 3. 随机选一个 CVRP 实例 —— #
-        self.instance = random.choice(self.instances)
+        # self.instance = random.choice(self.instances)
         # print(self.instance)
         # —— 4. 读入实例并构造初始解 —— #
         # nb_customers, truck_capacity, dist_matrix_data, dist_depot_data, demands_data = \
@@ -113,7 +115,7 @@ class cvrpAlnsEnv_LSA1(Env):
          charging_rate, velocity, depot, customers, fuel_stations,
          nodes, tasks_info, distance_matrix) = \
             cvrp_helper_functions.load_problem_instance(self.instance)
-
+        # print(customers)
 
         nb_customers = len(customers)
         state = cvrpEnv(
@@ -140,7 +142,7 @@ class cvrpAlnsEnv_LSA1(Env):
         self.dr_alns.add_destroy_operator(random_route_removal)
         self.dr_alns.add_destroy_operator(least_cus_route_removal)
 
-        # self.dr_alns.add_repair_operator(random_repair)
+        self.dr_alns.add_repair_operator(random_repair)
         self.dr_alns.add_repair_operator(time_based_repair)
         self.dr_alns.add_repair_operator(regret_2_insertion)
         self.dr_alns.add_repair_operator(regret_3_insertion)
@@ -162,6 +164,141 @@ class cvrpAlnsEnv_LSA1(Env):
         obs = self.make_observation()
         info = {}
         return obs, info
+
+
+#     def __init__(self, config, **kwargs):
+#
+#         # Parameters
+#         super().__init__()
+#         self.config = config["environment"]
+#         self.rnd_state = rnd.RandomState()
+#
+#         # Simulated annealing acceptance criteria
+#         self.max_temperature = 5
+#         self.temperature = 5
+#
+#         # # LOAD INSTANCE
+#         # base_path = Path(__file__).resolve().parents[2]
+#         # self.instance_file = str(base_path.joinpath(self.config["instance_file"]))
+#         #
+#         # self.instances = self.config["instance_nr"]
+#
+#         # LOAD INSTANCE FILES
+#         base_path = Path(__file__).resolve().parents[2]
+#
+#         self.instance_folder = str(base_path.joinpath(self.config["instance_folder"]))
+#         self.instances = cvrp_helper_functions.list_problem_files(self.instance_folder)
+#
+#         self.instance = None
+#         self.best_routes = []
+#
+#         self.initial_solution = None
+#         self.best_solution = None
+#         self.current_solution = None
+#
+#         self.improvement = None
+#         self.cost_difference_from_best = None
+#         self.current_updated = None
+#         self.current_improved = None
+#
+#         # Gym-related part
+#         self.reward = 0  # Total episode reward
+#         self.done = False  # Termination
+#         self.episode = 0  # Episode number (one episode consists of ngen generations)
+#         self.iteration = 0  # Current gen in the episode
+#         self.max_iterations = self.config["iterations"]  # max number of generations in an episode
+#
+#         # Action and observation spaces
+#         self.action_space = gym.spaces.MultiDiscrete([10, 5, 10, 100])
+#         self.observation_space = gym.spaces.Box(shape=(8,), low=0, high=100, dtype=np.float64)
+#
+#     def make_observation(self):
+#         """
+#         Return the environment's current state
+#         """
+#
+#         is_current_best = 0
+#         if self.current_solution.objective() == self.best_solution.objective():
+#             is_current_best = 1
+#
+#         state = np.array(
+#             [self.improvement, self.cost_difference_from_best, is_current_best, self.temperature,
+#              self.stagcount, self.iteration / self.max_iterations, self.current_updated, self.current_improved],
+#             dtype=np.float64).squeeze()
+#
+#         return state
+#
+# # 修改版:
+#     def reset(self, *, seed=None, options=None):
+#
+#         # —— 1. 先调用父类 reset，传递 seed 给基础逻辑（如果需要） —— #
+#         super().reset(seed=seed)
+#
+# # —— 恢复旧版随机流程 ——
+#         random.seed(seed)                  # Python random
+#         SEED = random.randint(0, 10_000)   # 仿照旧版
+# # 随后所有随机都用这个 RandomState，完全复刻旧版
+#         self.rnd_state = rnd.RandomState(SEED)
+#
+#         # —— 3. 随机选一个 CVRP 实例 —— #
+#         self.instance = random.choice(self.instances)
+#         # print(self.instance)
+#         # —— 4. 读入实例并构造初始解 —— #
+#         # nb_customers, truck_capacity, dist_matrix_data, dist_depot_data, demands_data = \
+#         #     cvrp_helper_functions.read_input_cvrp(self.instance_file, self.instance)
+#         (tank_capacity, now_energy, load_capacity, fuel_consumption_rate,
+#          charging_rate, velocity, depot, customers, fuel_stations,
+#          nodes, tasks_info, distance_matrix) = \
+#             cvrp_helper_functions.load_problem_instance(self.instance)
+#         # print(customers)
+#
+#         nb_customers = len(customers)
+#         state = cvrpEnv(
+#             [], tank_capacity, now_energy, load_capacity, fuel_consumption_rate,
+#             charging_rate, velocity, depot, customers, fuel_stations,
+#             nodes, tasks_info, distance_matrix, self.instance, SEED)
+#
+#         self.initial_solution = compute_initial_solution(state, self.rnd_state)
+#
+#         self.current_solution = copy.deepcopy(self.initial_solution)
+#         self.best_solution = copy.deepcopy(self.initial_solution)
+#
+#         # —— 5. 构造 ALNS，注册 operator —— #
+#         # add operators to the dr_alns class
+#         self.dr_alns = ALNS(self.rnd_state)
+#         self.dr_alns.add_destroy_operator(random_removal)
+#         self.dr_alns.add_destroy_operator(worst_dist_cust_removal)
+#         self.dr_alns.add_destroy_operator(worst_time_cust_removal)
+#         self.dr_alns.add_destroy_operator(shaw_destroy)
+#         self.dr_alns.add_destroy_operator(proximity_based_removal)
+#         self.dr_alns.add_destroy_operator(time_based_removal)
+#         self.dr_alns.add_destroy_operator(zone_removal)
+#         self.dr_alns.add_destroy_operator(shortest_route_removal)
+#         self.dr_alns.add_destroy_operator(random_route_removal)
+#         self.dr_alns.add_destroy_operator(least_cus_route_removal)
+#
+#         self.dr_alns.add_repair_operator(random_repair)
+#         self.dr_alns.add_repair_operator(time_based_repair)
+#         self.dr_alns.add_repair_operator(regret_2_insertion)
+#         self.dr_alns.add_repair_operator(regret_3_insertion)
+#         self.dr_alns.add_repair_operator(greedy_repair)
+#
+#
+#         # —— 6. 重置各类统计、计数器 —— #
+#         self.stagcount = 0
+#         self.current_improved = 0
+#         self.current_updated = 0
+#         self.episode += 1
+#         self.temperature = self.max_temperature
+#         self.improvement = 0
+#         self.cost_difference_from_best = 0
+#
+#         self.iteration, self.reward = 0, 0
+#         self.done = False
+#
+#         obs = self.make_observation()
+#         info = {}
+#         return obs, info
 
     def step(self, action):
 
@@ -195,7 +332,9 @@ class cvrpAlnsEnv_LSA1(Env):
 
         r_name, r_operator = self.dr_alns.repair_operators[r_idx]
         candidate = r_operator(destroyed, self.rnd_state)
-        # print(candidate.routes)
+        # if candidate.routes == [['D0', 'C5', 'C6', 'C3', 'C2', 'C1', 'C4', 'C7', 'D0']]:
+        #     print(f"find this route, and the cost is {candidate.objective()}")
+        # print(candidate.routes, candidate.objective())
 
         new_best, new_current = self.consider_candidate(best, current, candidate)
 
@@ -296,25 +435,58 @@ class cvrpAlnsEnv_LSA1(Env):
         except KeyboardInterrupt:
             pass
 
+    # def run_time_limit(self, model, episodes=1):
+    #     """
+    #     Use a trained model to select actions
+    #     """
+    #     try:
+    #         for episode in range(episodes):
+    #             start_time = time.time()
+    #             time_done = False
+    #             state, info = self.reset()
+    #             while not time_done:
+    #                 action = model.predict(state)
+    #                 state, reward, terminated, truncated, _ = self.step(action[0])
+    #                 current_time = time.time() - start_time
+    #                 # print(current_time)
+    #                 if current_time > 10:
+    #                     time_done = True
+    #
+    #                 # print(state, reward, self.iteration)
+    #     except KeyboardInterrupt:
+    #         pass
+
+    # 收敛曲线
     def run_time_limit(self, model, episodes=1):
         """
         Use a trained model to select actions
         """
         try:
+            objective_history = []
             for episode in range(episodes):
                 start_time = time.time()
                 time_done = False
-                state = self.reset()
+                state, info = self.reset()
+                current_best_objective = self.best_solution.objective()
+                objective_history.append((0, current_best_objective))
                 while not time_done:
                     action = model.predict(state)
-                    state, reward, _, _ = self.step(action[0])
+                    state, reward, terminated, truncated, _ = self.step(action[0])
                     current_time = time.time() - start_time
-                    print(current_time)
-                    if current_time > 30:
+                    # print(current_time)
+                    if current_time > 1:
                         time_done = True
-                    # print(state, reward, self.iteration)
+                    if self.best_solution.objective() < current_best_objective:
+                        current_best_objective = self.best_solution.objective()
+                    if time_done:
+                        rb = cvrpEnv.remaining_energies(self.best_solution)
+                    objective_history.append((current_time, current_best_objective))
+
+            return objective_history, rb
+
         except KeyboardInterrupt:
             pass
+
 
     def sample(self):
         """
