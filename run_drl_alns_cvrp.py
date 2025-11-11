@@ -10,6 +10,7 @@ from rl.environments.cvrpAlnsEnv_LSA1 import cvrpAlnsEnv_LSA1
 import helper_functions
 from routing.cvrp.alns_cvrp import cvrp_helper_functions
 from stable_baselines3 import PPO
+from typing import List, Dict, Any
 
 DEFAULT_RESULTS_ROOT = "single_runs/"
 PARAMETERS_FILE = "configs/drl_alns_cvrp_debug.json"
@@ -351,6 +352,59 @@ def run_algo_for_instance(instance_file: str, model, iterations: int, rseed: int
 
     return instance_name, best_objective, objective_history,rb
 
+def run_multi_period_instance(
+        instance_file: str,
+        model,
+        iterations: int,
+        rseed: int,
+        time_limit: float = 1.0,
+) -> List[Dict[str, Any]]:
+    """顺序求解同一实例文件中的多个周期。
+
+    返回值列表中包含每个周期的基本信息：最优目标、路径、收敛曲线以及
+    下一周期可用的剩余电量。"""
+
+    base_path = Path(__file__).resolve().parents[2]
+    instance_path = Path(instance_file)
+    if not instance_path.is_absolute():
+        instance_path = base_path.joinpath(instance_file)
+
+    multi_instance = cvrp_helper_functions.load_multi_period_instance(str(instance_path))
+
+    env_parameters = {
+        'environment': {
+            'iterations': iterations,
+            'instance_nr': 100,
+            'instance_file': str(instance_path),
+            'instance_folder': str(instance_path.parent),
+        }
+    }
+
+    env = cvrpAlnsEnv_LSA1(env_parameters)
+
+    current_energy = multi_instance.vehicle.now_energy
+    period_summaries: List[Dict[str, Any]] = []
+
+    for idx, period in enumerate(multi_instance.periods):
+        env.prepare_period(multi_instance, period, current_energy)
+        objective_history, remaining_energy = env.run_time_limit(model, episodes=1, time_limit=time_limit)
+
+        best_objective = env.best_solution.objective() if env.best_solution else None
+        period_summary: Dict[str, Any] = {
+            'period_index': idx,
+            'period_name': period.name,
+            'best_objective': best_objective,
+            'routes': env.best_solution.routes if env.best_solution else None,
+            'objective_history': objective_history,
+            'remaining_energy': remaining_energy,
+        }
+        period_summaries.append(period_summary)
+
+        if remaining_energy is not None:
+            current_energy = remaining_energy
+
+    return period_summaries
+
 # # 收敛曲线
 # def main(param_file=PARAMETERS_FILE):
 #     """
@@ -420,72 +474,208 @@ def run_algo_for_instance(instance_file: str, model, iterations: int, rseed: int
 #         print("成功保存！程序结束。")
 
 
+# def main(param_file=PARAMETERS_FILE):
+#     """
+#     --- 这是修改后的新主函数 ---
+#     目标：为每个实例运行DRL-ALNS算法10次，
+#     并将所有详细的收敛数据保存到一个标准化的CSV文件中。
+#     """
+#     # 1. 读取参数，加载模型，获取实例文件列表 (与您原代码类似)
+#     parameters = helper_functions.readJSONFile(param_file)
+#     seed = parameters['rseed']
+#     iterations = parameters['iterations']
+#     base_path = Path(__file__).resolve().parent.parent.parent
+#     model_path = base_path / parameters['model_directory'] / 'model'
+#     model = PPO.load(model_path)
+#     instance_folder_path = str(base_path.joinpath(parameters["instance_folder"]))
+#     all_instance_files = cvrp_helper_functions.list_problem_files(instance_folder_path)
+#
+#     print(f"模型已加载。找到 {len(all_instance_files)} 个实例。")
+#
+#     # 2. 准备一个列表，用于收集所有运行的详细数据
+#     all_convergence_runs = []
+#     num_runs = 10  # 定义每个实例的运行次数
+#
+#     # 3. 外层循环：遍历每个实例文件
+#     for i, instance_file_path in enumerate(all_instance_files):
+#         instance_name_with_ext = Path(instance_file_path).name
+#         print(f"\n[{i+1}/{len(all_instance_files)}] 正在处理实例: {instance_name_with_ext}")
+#
+#         # 4. 内层循环：对当前实例重复运行 `num_runs` 次
+#         for run_num in range(1, num_runs + 1):
+#             print(f"  - 第 {run_num}/{num_runs} 次运行...")
+#
+#             # 为当前实例运行一次算法
+#             _, best_objective, objective_history, rb = run_algo_for_instance(
+#                 instance_file=instance_file_path,
+#                 model=model,
+#                 iterations=iterations,
+#                 rseed=seed + run_num  # 每次运行使用不同的随机种子以保证结果差异
+#             )
+#
+#             print(rb)
+#
+#             # 5. 解包收敛数据并以标准格式记录
+#             if objective_history:
+#                 times, costs = zip(*objective_history)
+#             else:
+#                 times, costs = [], []
+#
+#             all_convergence_runs.append({
+#                 "File": instance_name_with_ext,
+#                 "Algorithm": "DRL-ALNS",
+#                 "Run": run_num,
+#                 "Final_Cost": best_objective,
+#                 "Costs": list(costs),  # 将元组转换为列表
+#                 "Times": list(times)   # 将元组转换为列表
+#             })
+#
+#     # 6. 所有实验结束后，将收集到的所有数据一次性保存到CSV文件
+#     print("\n所有实验运行完毕。正在保存详细收敛数据...")
+#     output_folder = Path(DEFAULT_RESULTS_ROOT)
+#     output_folder.mkdir(parents=True, exist_ok=True)
+#     output_file = output_folder / "drl_alns_convergence_runs.csv"
+#
+#     convergence_df = pd.DataFrame(all_convergence_runs)
+#     convergence_df.to_csv(output_file, index=False)
+#
+#     print(f"数据已成功保存至: {output_file}")
+
+def _format_remaining_energy(energy: Any) -> str:
+    """Return a stable string representation for CSV exports."""
+
+    if energy is None:
+        return ""
+
+    if isinstance(energy, (list, tuple, np.ndarray)):
+        return ";".join(f"{float(value):.6f}" for value in energy)
+
+    return f"{float(energy):.6f}"
+
+
+# 多轮
 def main(param_file=PARAMETERS_FILE):
-    """
-    --- 这是修改后的新主函数 ---
-    目标：为每个实例运行DRL-ALNS算法10次，
-    并将所有详细的收敛数据保存到一个标准化的CSV文件中。
-    """
-    # 1. 读取参数，加载模型，获取实例文件列表 (与您原代码类似)
+    """批量求解多周期实例文件夹，并输出原始与求和结果。"""
+
     parameters = helper_functions.readJSONFile(param_file)
-    seed = parameters['rseed']
+    seed = parameters.get('rseed', 0)
     iterations = parameters['iterations']
+    num_runs = int(parameters.get('runs_per_instance', 10))
+    time_limit = float(parameters.get('multi_period_time_limit', 1.0))
+
     base_path = Path(__file__).resolve().parent.parent.parent
     model_path = base_path / parameters['model_directory'] / 'model'
     model = PPO.load(model_path)
-    instance_folder_path = str(base_path.joinpath(parameters["instance_folder"]))
-    all_instance_files = cvrp_helper_functions.list_problem_files(instance_folder_path)
 
-    print(f"模型已加载。找到 {len(all_instance_files)} 个实例。")
+    folder_key = parameters.get('instance_folder')
+    if not folder_key:
+        raise ValueError("参数 'multi_period_instance_folder' 未设置，无法批量处理多周期实例。")
 
-    # 2. 准备一个列表，用于收集所有运行的详细数据
-    all_convergence_runs = []
-    num_runs = 10  # 定义每个实例的运行次数
+    instance_folder = Path(folder_key)
+    if not instance_folder.is_absolute():
+        instance_folder = base_path / folder_key
 
-    # 3. 外层循环：遍历每个实例文件
-    for i, instance_file_path in enumerate(all_instance_files):
-        instance_name_with_ext = Path(instance_file_path).name
-        print(f"\n[{i+1}/{len(all_instance_files)}] 正在处理实例: {instance_name_with_ext}")
+    all_instance_files = cvrp_helper_functions.list_problem_files(str(instance_folder))
+    if not all_instance_files:
+        raise FileNotFoundError(f"在目录 {instance_folder} 下未找到任何实例文件。")
 
-        # 4. 内层循环：对当前实例重复运行 `num_runs` 次
-        for run_num in range(1, num_runs + 1):
-            print(f"  - 第 {run_num}/{num_runs} 次运行...")
+    print(f"模型已加载。将在文件夹 {instance_folder} 中处理 {len(all_instance_files)} 个多周期实例，每个实例运行 {num_runs} 次。")
 
-            # 为当前实例运行一次算法
-            _, best_objective, objective_history, rb = run_algo_for_instance(
-                instance_file=instance_file_path,
+    raw_records: List[Dict[str, Any]] = []
+    total_cost_records: List[Dict[str, Any]] = []
+    summary_records: List[Dict[str, Any]] = []
+
+    for instance_index, instance_file in enumerate(all_instance_files, start=1):
+        instance_path = Path(instance_file)
+        instance_name = instance_path.stem
+
+        print(f"\n[{instance_index}/{len(all_instance_files)}] 开始求解实例: {instance_path.name}")
+
+        total_costs: List[float] = []
+        num_periods = None
+
+        for run_idx in range(1, num_runs + 1):
+            print(f"  - 第 {run_idx}/{num_runs} 次运行...")
+            summaries = run_multi_period_instance(
+                instance_file=str(instance_path),
                 model=model,
                 iterations=iterations,
-                rseed=seed + run_num  # 每次运行使用不同的随机种子以保证结果差异
+                rseed=seed + run_idx,
+                time_limit=time_limit,
             )
 
-            print(rb)
+            if num_periods is None:
+                num_periods = len(summaries)
 
-            # 5. 解包收敛数据并以标准格式记录
-            if objective_history:
-                times, costs = zip(*objective_history)
-            else:
-                times, costs = [], []
+            run_total = 0.0
+            for summary in summaries:
+                best_obj = summary.get('best_objective')
+                if best_obj is not None:
+                    run_total += float(best_obj)
 
-            all_convergence_runs.append({
-                "File": instance_name_with_ext,
-                "Algorithm": "DRL-ALNS",
-                "Run": run_num,
-                "Final_Cost": best_objective,
-                "Costs": list(costs),  # 将元组转换为列表
-                "Times": list(times)   # 将元组转换为列表
+                raw_records.append({
+                    'instance_name': instance_name,
+                    'run': run_idx,
+                    'period_index': summary.get('period_index'),
+                    'period_name': summary.get('period_name'),
+                    'best_objective': "" if best_obj is None else f"{float(best_obj):.6f}",
+                    'remaining_energy': _format_remaining_energy(summary.get('remaining_energy')),
+                })
+
+            total_costs.append(run_total)
+            total_cost_records.append({
+                'instance_name': instance_name,
+                'run': run_idx,
+                'total_cost': f"{run_total:.6f}",
             })
 
-    # 6. 所有实验结束后，将收集到的所有数据一次性保存到CSV文件
-    print("\n所有实验运行完毕。正在保存详细收敛数据...")
+        average_total = float(np.mean(total_costs)) if total_costs else 0.0
+        std_total = float(np.std(total_costs)) if total_costs else 0.0
+
+        summary_records.append({
+            'instance_name': instance_name,
+            'num_periods': num_periods or 0,
+            'num_runs': num_runs,
+            'average_total_cost': f"{average_total:.6f}",
+            'std_total_cost': f"{std_total:.6f}",
+        })
+
+        print(f"  -> 实例完成。总成本平均值: {average_total:.6f}, 标准差: {std_total:.6f}")
+
     output_folder = Path(DEFAULT_RESULTS_ROOT)
     output_folder.mkdir(parents=True, exist_ok=True)
-    output_file = output_folder / "drl_alns_convergence_runs.csv"
 
-    convergence_df = pd.DataFrame(all_convergence_runs)
-    convergence_df.to_csv(output_file, index=False)
+    raw_file = output_folder / "multi_period_raw_results.csv"
+    with open(raw_file, 'w', newline='', encoding='utf-8') as raw_csv:
+        fieldnames = ['instance_name', 'run', 'period_index', 'period_name', 'best_objective', 'remaining_energy']
+        writer = csv.DictWriter(raw_csv, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(raw_records)
 
-    print(f"数据已成功保存至: {output_file}")
+    total_file = output_folder / "multi_period_total_costs.csv"
+    with open(total_file, 'w', newline='', encoding='utf-8') as total_csv:
+        fieldnames = ['instance_name', 'run', 'total_cost']
+        writer = csv.DictWriter(total_csv, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(total_cost_records)
+
+    summary_file = output_folder / "multi_period_instance_summary.csv"
+    with open(summary_file, 'w', newline='', encoding='utf-8') as summary_csv:
+        fieldnames = ['instance_name', 'num_periods', 'num_runs', 'average_total_cost', 'std_total_cost']
+        writer = csv.DictWriter(summary_csv, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(summary_records)
+
+    print("\n所有实例求解完成。")
+    print(f"原始分周期结果保存至: {raw_file}")
+    print(f"各次运行总成本保存至: {total_file}")
+    print(f"实例平均结果保存至: {summary_file}")
+
+    return {
+        'raw_results_file': str(raw_file),
+        'total_costs_file': str(total_file),
+        'summary_file': str(summary_file),
+    }
 
 if __name__ == "__main__":
     main()
