@@ -1,5 +1,7 @@
 import copy
 import time
+from typing import Optional, Sequence, Tuple, Union, TYPE_CHECKING
+
 import gymnasium as gym
 from gymnasium import Env
 from gymnasium import spaces
@@ -9,7 +11,6 @@ from alns import ALNS
 import numpy as np
 import numpy.random as rnd
 from pathlib import Path
-
 
 import sys
 sys.path.insert(0, 'C:/Users/10133/Desktop/DR-ALNS-master/DR-ALNS/code/src')  # 替换为你的本地项目路径
@@ -28,6 +29,8 @@ from routing.cvrp.alns_cvrp.initial_solution import compute_initial_solution
 
 import inspect
 
+if TYPE_CHECKING:
+    from routing.cvrp.alns_cvrp.cvrp_helper_functions import MultiPeriodInstance, PeriodData
 
 class cvrpAlnsEnv_LSA1(Env):
     def __init__(self, config, **kwargs):
@@ -66,6 +69,10 @@ class cvrpAlnsEnv_LSA1(Env):
         self.current_updated = None
         self.current_improved = None
 
+        # Multi-period support helpers
+        self._pending_period_bundle: Optional[Tuple["MultiPeriodInstance", "PeriodData", Union[float, Sequence[float]]]] = None
+        self._active_period_bundle: Optional[Tuple["MultiPeriodInstance", "PeriodData", Union[float, Sequence[float]]]] = None
+
         # Gym-related part
         self.reward = 0  # Total episode reward
         self.done = False  # Termination
@@ -93,6 +100,20 @@ class cvrpAlnsEnv_LSA1(Env):
 
         return state
 
+    def prepare_period(
+            self,
+            instance: "MultiPeriodInstance",
+            period: "PeriodData",
+            now_energy: Union[float, Sequence[float]],
+    ) -> None:
+        """Queue a specific period to be used on the next ``reset`` call.
+
+        This allows callers to reuse the same environment while supplying
+        period-specific customer data and the current vehicle energy state.
+        """
+
+        self._pending_period_bundle = (instance, period, now_energy)
+
 # 修改版:
     def reset(self, *, seed=None, options=None):
 
@@ -111,17 +132,39 @@ class cvrpAlnsEnv_LSA1(Env):
         # —— 4. 读入实例并构造初始解 —— #
         # nb_customers, truck_capacity, dist_matrix_data, dist_depot_data, demands_data = \
         #     cvrp_helper_functions.read_input_cvrp(self.instance_file, self.instance)
-        (tank_capacity, now_energy, load_capacity, fuel_consumption_rate,
-         charging_rate, velocity, depot, customers, fuel_stations,
-         nodes, tasks_info, distance_matrix) = \
-            cvrp_helper_functions.load_problem_instance(self.instance)
+        if self._pending_period_bundle is not None:
+            instance, period, now_energy = self._pending_period_bundle
+            self._active_period_bundle = self._pending_period_bundle
+            self._pending_period_bundle = None
+
+            vehicle = instance.vehicle
+            tank_capacity = vehicle.tank_capacity
+            load_capacity = vehicle.load_capacity
+            fuel_consumption_rate = vehicle.fuel_consumption_rate
+            charging_rate = vehicle.charging_rate
+            velocity = vehicle.velocity
+            depot = instance.depot
+            customers = period.customers
+            fuel_stations = instance.fuel_stations
+            nodes = period.nodes
+            tasks_info = period.tasks_info
+            distance_matrix = period.distance_matrix
+            problem_identifier = f"{instance.source}|{period.name}"
+            self.instance = instance.source
+        else:
+            (tank_capacity, now_energy, load_capacity, fuel_consumption_rate,
+             charging_rate, velocity, depot, customers, fuel_stations,
+             nodes, tasks_info, distance_matrix) = \
+                cvrp_helper_functions.load_problem_instance(self.instance)
+            problem_identifier = self.instance
+            self._active_period_bundle = None
         # print(customers)
 
         nb_customers = len(customers)
         state = cvrpEnv(
             [], tank_capacity, now_energy, load_capacity, fuel_consumption_rate,
             charging_rate, velocity, depot, customers, fuel_stations,
-            nodes, tasks_info, distance_matrix, self.instance, SEED)
+            nodes, tasks_info, distance_matrix, problem_identifier, SEED)
 
         self.initial_solution = compute_initial_solution(state, self.rnd_state)
 
@@ -457,7 +500,37 @@ class cvrpAlnsEnv_LSA1(Env):
     #         pass
 
     # 收敛曲线
-    def run_time_limit(self, model, episodes=1):
+    # def run_time_limit(self, model, episodes=1):
+    #     """
+    #     Use a trained model to select actions
+    #     """
+    #     try:
+    #         objective_history = []
+    #         for episode in range(episodes):
+    #             start_time = time.time()
+    #             time_done = False
+    #             state, info = self.reset()
+    #             current_best_objective = self.best_solution.objective()
+    #             objective_history.append((0, current_best_objective))
+    #             while not time_done:
+    #                 action = model.predict(state)
+    #                 state, reward, terminated, truncated, _ = self.step(action[0])
+    #                 current_time = time.time() - start_time
+    #                 # print(current_time)
+    #                 if current_time > 1:
+    #                     time_done = True
+    #                 if self.best_solution.objective() < current_best_objective:
+    #                     current_best_objective = self.best_solution.objective()
+    #                 if time_done:
+    #                     rb = cvrpEnv.remaining_energies(self.best_solution)
+    #                 objective_history.append((current_time, current_best_objective))
+    #
+    #         return objective_history, rb
+    #
+    #     except KeyboardInterrupt:
+    #         pass
+
+    def run_time_limit(self, model, episodes=1, time_limit: float = 1.0):
         """
         Use a trained model to select actions
         """
@@ -474,15 +547,19 @@ class cvrpAlnsEnv_LSA1(Env):
                     state, reward, terminated, truncated, _ = self.step(action[0])
                     current_time = time.time() - start_time
                     # print(current_time)
-                    if current_time > 1:
+                    if current_time > time_limit:
+                        time_done = True
+                    if terminated or truncated:
                         time_done = True
                     if self.best_solution.objective() < current_best_objective:
                         current_best_objective = self.best_solution.objective()
-                    if time_done:
-                        rb = cvrpEnv.remaining_energies(self.best_solution)
                     objective_history.append((current_time, current_best_objective))
 
-            return objective_history, rb
+            remaining_energy = None
+            if self.best_solution is not None:
+                remaining_energy = self.best_solution.remaining_energies()
+
+            return objective_history, remaining_energy
 
         except KeyboardInterrupt:
             pass
