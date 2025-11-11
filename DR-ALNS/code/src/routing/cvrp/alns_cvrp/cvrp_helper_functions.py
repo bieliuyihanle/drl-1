@@ -4,6 +4,7 @@ import sys
 import math
 import random
 import numpy as np
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from pathlib import Path
 
@@ -30,6 +31,44 @@ def read_elem(filename):
 #     folder_path = Path(folder)
 #     files = sorted(str(p) for p in folder_path.glob("*.txt"))
 #     return files
+
+# ---------------------------------------------------------------------------
+# Dataclasses & typed containers used by the instance loading helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class VehicleConfig:
+    """Vehicle configuration shared by all periods of an instance."""
+
+    tank_capacity: float
+    now_energy: Union[float, List[float]]
+    load_capacity: float
+    fuel_consumption_rate: float
+    charging_rate: float
+    velocity: float
+
+
+@dataclass(frozen=True)
+class PeriodData:
+    """All information required to solve a single period."""
+
+    name: str
+    customers: List[List[Any]]
+    nodes: List[str]
+    tasks_info: Dict[str, Dict[str, Any]]
+    distance_matrix: Dict[str, Dict[str, float]]
+
+
+@dataclass(frozen=True)
+class MultiPeriodInstance:
+    """Representation of an instance that may contain multiple periods."""
+
+    source: str
+    vehicle: VehicleConfig
+    depot: List[Any]
+    fuel_stations: List[List[Any]]
+    periods: List[PeriodData]
 
 
 def list_problem_files(folder: str) -> List[str]:
@@ -80,6 +119,147 @@ def _parse_energy_values(raw_value: str) -> Union[float, List[float]]:
 
     return values
 
+def _read_targets_block(file_obj) -> Tuple[List[Any], List[List[Any]], List[List[Any]]]:
+    """Read the first block containing depot, stations and customer definitions."""
+
+    target_line = file_obj.readline()
+
+    customers: List[List[Any]] = []
+    fuel_stations: List[List[Any]] = []
+    depot: Optional[List[Any]] = None
+
+    while target_line and target_line != '\n':
+        stl = target_line.split()
+        if len(stl) < 8:
+            raise ValueError(f"Malformed target line: '{target_line.strip()}'")
+
+        idx = int(stl[0][1:])
+        new_target = [
+            stl[0],
+            idx,
+            float(stl[2]),
+            float(stl[3]),
+            int(float(stl[4])),
+            int(float(stl[5])),
+            int(float(stl[6])),
+            int(float(stl[7])),
+        ]
+
+        if stl[1] == 'd':
+            depot = new_target
+        elif stl[1] == 'f':
+            fuel_stations.append(new_target)
+        elif stl[1] == 'c':
+            customers.append(new_target)
+        else:
+            raise ValueError(f"Unknown target type '{stl[1]}' in line '{target_line.strip()}'")
+
+        target_line = file_obj.readline()
+
+    if depot is None:
+        raise ValueError("Instance file is missing a depot definition.")
+
+    return depot, customers, fuel_stations
+
+
+def _read_vehicle_configuration(file_obj) -> VehicleConfig:
+    """Parse the configuration section that contains vehicle parameters."""
+
+    configuration_line = file_obj.readline()
+    if not configuration_line:
+        raise ValueError("Unexpected end of file while reading vehicle configuration.")
+    tank_capacity = float(configuration_line.split('/')[1])
+
+    configuration_line = file_obj.readline()
+    if not configuration_line:
+        raise ValueError("Unexpected end of file while reading vehicle now energy.")
+    now_energy_raw = configuration_line.split('/')[1]
+    now_energy = _parse_energy_values(now_energy_raw)
+
+    configuration_line = file_obj.readline()
+    if not configuration_line:
+        raise ValueError("Unexpected end of file while reading load capacity.")
+    load_capacity = float(configuration_line.split('/')[1])
+
+    configuration_line = file_obj.readline()
+    if not configuration_line:
+        raise ValueError("Unexpected end of file while reading fuel consumption rate.")
+    fuel_consumption_rate = float(configuration_line.split('/')[1])
+
+    configuration_line = file_obj.readline()
+    if not configuration_line:
+        raise ValueError("Unexpected end of file while reading charging rate.")
+    charging_rate = float(configuration_line.split('/')[1])
+
+    configuration_line = file_obj.readline()
+    if not configuration_line:
+        raise ValueError("Unexpected end of file while reading vehicle velocity.")
+    velocity = float(configuration_line.split('/')[1])
+
+    return VehicleConfig(
+        tank_capacity=tank_capacity,
+        now_energy=now_energy,
+        load_capacity=load_capacity,
+        fuel_consumption_rate=fuel_consumption_rate,
+        charging_rate=charging_rate,
+        velocity=velocity,
+    )
+
+
+def _parse_period_sections(raw_text: str) -> List[Tuple[Optional[str], List[List[Any]]]]:
+    """Parse additional period blocks from the remaining part of the instance file."""
+
+    if not raw_text:
+        return []
+
+    periods: List[Tuple[Optional[str], List[List[Any]]]] = []
+    current_customers: List[List[Any]] = []
+    current_name: Optional[str] = None
+
+    def flush_period():
+        nonlocal current_customers, current_name
+        if current_customers:
+            periods.append((current_name, current_customers))
+            current_customers = []
+            current_name = None
+
+    for raw_line in raw_text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+
+        normalized = stripped.strip('[]').lstrip('#').strip()
+        lower = normalized.lower()
+        if lower.startswith('period'):
+            flush_period()
+            current_name = normalized or None
+            continue
+
+        stl = stripped.split()
+        if len(stl) < 8:
+            raise ValueError(f"Malformed customer definition in period block: '{stripped}'")
+
+        if stl[1] != 'c':
+            raise ValueError(
+                "Only customer (type 'c') entries are allowed inside period-specific blocks."
+            )
+
+        idx = int(stl[0][1:])
+        new_target = [
+            stl[0],
+            idx,
+            float(stl[2]),
+            float(stl[3]),
+            int(float(stl[4])),
+            int(float(stl[5])),
+            int(float(stl[6])),
+            int(float(stl[7])),
+        ]
+        current_customers.append(new_target)
+
+    flush_period()
+    return periods
+
 
 def get_vehicle_energy(now_energy, route_idx: int, default: Optional[float] = None) -> float:
     """Return the initial energy for the vehicle assigned to ``route_idx``.
@@ -99,8 +279,7 @@ def get_vehicle_energy(now_energy, route_idx: int, default: Optional[float] = No
     if isinstance(now_energy, (list, tuple, np.ndarray)):
         if route_idx < len(now_energy):
             return now_energy[route_idx]
-        if len(now_energy) > 0:
-            return now_energy[-1]
+        return 1500.0
 
     if now_energy is None:
         if default is None:
@@ -108,6 +287,34 @@ def get_vehicle_energy(now_energy, route_idx: int, default: Optional[float] = No
         return default
 
     return float(now_energy)
+
+def _coerce_energy_sequence(
+        now_energy: Union[float, Sequence[float], np.ndarray, Dict[Any, Any], None],
+        fallback: float,
+) -> Tuple[List[float], float]:
+    """Return a list representation of ``now_energy`` and the fallback value."""
+
+    if isinstance(now_energy, dict):
+        default_value = float(now_energy.get("default", fallback))
+        numeric_keys = [key for key in now_energy.keys() if isinstance(key, int)]
+        if numeric_keys:
+            length = max(numeric_keys) + 1
+            values = [default_value] * length
+            for key in numeric_keys:
+                values[key] = float(now_energy[key])
+        else:
+            values = []
+        return values, default_value
+
+    if isinstance(now_energy, (list, tuple, np.ndarray)):
+        values = [float(value) for value in now_energy]
+        return values, fallback
+
+    if now_energy is None:
+        return [], fallback
+
+    value = float(now_energy)
+    return [value], fallback
 
 
 def compute_remaining_energies(
@@ -122,11 +329,16 @@ def compute_remaining_energies(
 ) -> List[float]:
     """Return the remaining energy for each vehicle after completing its route."""
 
-    energies: List[float] = []
+    base_energies, fallback_value = _coerce_energy_sequence(now_energy, tank_capacity)
+    energies: List[float] = list(base_energies)
+
+    # Ensure the result can hold all routes that were actually used.
+    if len(energies) < len(routes):
+        energies.extend([fallback_value] * (len(routes) - len(energies)))
 
     for idx, route in enumerate(routes):
         vehicle_energy = get_vehicle_energy(now_energy, idx, tank_capacity)
-        remaining = calculate_remaining_tank1(
+        remaining = calculate_remaining_tank(
             route,
             tasks_info,
             distance_matrix,
@@ -134,62 +346,86 @@ def compute_remaining_energies(
             vehicle_energy,
             fuel_consumption_rate,
         )
-        energies.append(float(remaining))
+        if idx < len(energies):
+            energies[idx] = float(remaining)
+        else:
+            energies.append(float(remaining))
 
     return energies
 
 
 def load_problem_instance(file):
-    with (open(file) as f):
+    with open(file) as f:
         f.readline()  # ignore header
 
-        target_line = f.readline()
-
-        customers = []
-        fuel_stations = []
-        depot = None
-
-        while target_line != '\n':
-            stl = target_line.split()  # splitted target_line
-            idx = int(stl[0][1:])
-
-            new_target = [stl[0], idx, float(stl[2]), float(stl[3]), int(float(stl[4])),
-                          int(float(stl[5])), int(float(stl[6])), int(float(stl[7]))]
-
-            if stl[1] == 'd':
-                depot = new_target
-            elif stl[1] == 'f':
-                fuel_stations.append(new_target)
-            elif stl[1] == 'c':
-                customers.append(new_target)
-
-            target_line = f.readline()
-
-        configuration_line = f.readline()
-        tank_capacity = float(configuration_line.split('/')[1])  # q Vehicle fuel tank capacity
-
-        configuration_line = f.readline()
-        now_energy_raw = configuration_line.split('/')[1]  # e Vehicle now fuel tank capacity
-        now_energy = _parse_energy_values(now_energy_raw)
-
-        configuration_line = f.readline()
-        load_capacity = float(configuration_line.split('/')[1])  # C Vehicle load capacity
-
-        configuration_line = f.readline()
-        fuel_consumption_rate = float(configuration_line.split('/')[1])  # r fuel consumption rate
-
-        configuration_line = f.readline()
-        charging_rate = float(configuration_line.split('/')[1])  # g inverse refueling rate
-
-        configuration_line = f.readline()
-        velocity = float(configuration_line.split('/')[1])  # v average Velocity
+        depot, customers, fuel_stations = _read_targets_block(f)
+        vehicle_config = _read_vehicle_configuration(f)
 
         nodes, tasks_info = build_tasks_info(depot, customers, fuel_stations)
         distance_matrix = compute_dist_matrix(nodes, tasks_info)
 
-        return tank_capacity, now_energy, load_capacity, fuel_consumption_rate, charging_rate, velocity, depot, \
-               customers, fuel_stations, nodes, tasks_info, distance_matrix
+        return (
+            vehicle_config.tank_capacity,
+            vehicle_config.now_energy,
+            vehicle_config.load_capacity,
+            vehicle_config.fuel_consumption_rate,
+            vehicle_config.charging_rate,
+            vehicle_config.velocity,
+            depot,
+            customers,
+            fuel_stations,
+            nodes,
+            tasks_info,
+            distance_matrix,
+        )
 
+
+def load_multi_period_instance(file: str) -> MultiPeriodInstance:
+    """Load an instance that may contain multiple customer-period blocks."""
+
+    with open(file) as f:
+        f.readline()  # ignore header
+        depot, base_customers, fuel_stations = _read_targets_block(f)
+        vehicle_config = _read_vehicle_configuration(f)
+        remaining = f.read()
+
+    periods: List[PeriodData] = []
+
+    def make_period(customers: List[List[Any]], name: str) -> None:
+        nodes, tasks_info = build_tasks_info(depot, customers, fuel_stations)
+        distance_matrix = compute_dist_matrix(nodes, tasks_info)
+        periods.append(
+            PeriodData(
+                name=name,
+                customers=customers,
+                nodes=nodes,
+                tasks_info=tasks_info,
+                distance_matrix=distance_matrix,
+            )
+        )
+
+    if base_customers:
+        make_period(base_customers, "period_1")
+
+    parsed_additional_periods = _parse_period_sections(remaining)
+    next_index = len(periods) + 1
+    for maybe_name, customers in parsed_additional_periods:
+        period_name = maybe_name or f"period_{next_index}"
+        make_period(customers, period_name)
+        next_index += 1
+
+    # If no customers were found at all, create a placeholder empty period so that
+    # downstream code still receives a valid structure.
+    if not periods:
+        make_period([], "period_1")
+
+    return MultiPeriodInstance(
+        source=str(file),
+        vehicle=vehicle_config,
+        depot=depot,
+        fuel_stations=fuel_stations,
+        periods=periods,
+    )
 
 def build_tasks_info(
         depot: List[Any],

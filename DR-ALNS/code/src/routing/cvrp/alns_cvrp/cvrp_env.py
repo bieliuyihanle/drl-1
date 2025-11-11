@@ -1,9 +1,11 @@
 import sys
 sys.path.insert(0, 'C:/Users/10133/Desktop/DR-ALNS-master/DR-ALNS/code/src')  # 替换为你的本地项目路径
-from typing import List
+from typing import List, Optional, Sequence, Union, TYPE_CHECKING
 
 from routing.cvrp.alns_cvrp import cvrp_helper_functions
 
+if TYPE_CHECKING:
+    from routing.cvrp.alns_cvrp.cvrp_helper_functions import MultiPeriodInstance, PeriodData
 
 def evaluate_solution(routes, tasks_info, distance_matrix, tank_capacity, now_energy,
                       fuel_consumption_rate, charging_rate, velocity):
@@ -56,6 +58,40 @@ class cvrpEnv:
         self.problem_instance = problem_instance
 
         self.routes = initial_solution
+
+
+    @classmethod
+    def from_period(
+            cls,
+            period: "PeriodData",
+            instance: "MultiPeriodInstance",
+            now_energy: Union[float, Sequence[float]],
+            seed: int,
+            initial_solution: Optional[Sequence[Sequence[str]]] = None,
+            unassigned: Optional[Sequence[str]] = None,
+    ) -> "cvrpEnv":
+        """Instantiate ``cvrpEnv`` for a specific period of a multi-period instance."""
+
+        vehicle = instance.vehicle
+        problem_id = f"{instance.source}|{period.name}"
+        return cls(
+            list(initial_solution) if initial_solution is not None else [],
+            vehicle.tank_capacity,
+            now_energy,
+            vehicle.load_capacity,
+            vehicle.fuel_consumption_rate,
+            vehicle.charging_rate,
+            vehicle.velocity,
+            instance.depot,
+            period.customers,
+            instance.fuel_stations,
+            period.nodes,
+            period.tasks_info,
+            period.distance_matrix,
+            problem_id,
+            seed,
+            unassigned=list(unassigned) if unassigned is not None else None,
+        )
 
     def get_vehicle_energy(self, route_idx: int) -> float:
         return cvrp_helper_functions.get_vehicle_energy(self.now_energy, route_idx, self.tank_capacity)
