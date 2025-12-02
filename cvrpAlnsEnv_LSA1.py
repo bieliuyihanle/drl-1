@@ -56,8 +56,11 @@ class cvrpAlnsEnv_LSA1(Env):
         self.instance_folder = str(base_path.joinpath(self.config["instance_folder"]))
         self.instances = cvrp_helper_functions.list_problem_files(self.instance_folder)
 
-        self.instance = self.config['instance_file']
-        # self.instance = None
+        #run
+        # self.instance = self.config['instance_file']
+        # #model
+        self.instance = None
+
         self.best_routes = []
 
         self.initial_solution = None
@@ -127,7 +130,10 @@ class cvrpAlnsEnv_LSA1(Env):
         self.rnd_state = rnd.RandomState(SEED)
 
         # —— 3. 随机选一个 CVRP 实例 —— #
-        # self.instance = random.choice(self.instances)
+        #model
+        self.instance = random.choice(self.instances)
+
+
         # print(self.instance)
         # —— 4. 读入实例并构造初始解 —— #
         # nb_customers, truck_capacity, dist_matrix_data, dist_depot_data, demands_data = \
@@ -395,13 +401,13 @@ class cvrpAlnsEnv_LSA1(Env):
             self.current_solution = new_current
             self.current_updated = 1
             self.current_improved = 1
-            # self.reward += 3
+            self.reward += 3
 
         elif new_current != current and new_current.objective() <= current.objective():
             # solution accepted
             self.current_solution = new_current
             self.current_updated = 1
-            # self.reward += 1
+            self.reward += 1
 
         if new_current.objective() > current.objective():
             self.improvement = 1

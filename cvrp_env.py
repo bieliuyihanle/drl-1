@@ -7,35 +7,48 @@ from routing.cvrp.alns_cvrp import cvrp_helper_functions
 if TYPE_CHECKING:
     from routing.cvrp.alns_cvrp.cvrp_helper_functions import MultiPeriodInstance, PeriodData
 
+# def evaluate_solution(routes, tasks_info, distance_matrix, tank_capacity, now_energy,
+#                       fuel_consumption_rate, charging_rate, velocity):
+#     total_cost = 0
+#
+#     for idx, route in enumerate(routes):
+#         vehicle_energy = cvrp_helper_functions.get_vehicle_energy(now_energy, idx, tank_capacity)
+#         dist_cost = cvrp_helper_functions.calculate_route_distance(route, distance_matrix)
+#         # print(dist_cost)
+#         arrival_times = cvrp_helper_functions.calculate_arrival_times(
+#             route, tasks_info, distance_matrix, tank_capacity, vehicle_energy,
+#             fuel_consumption_rate, charging_rate, velocity
+#         )
+#         time_cost = 0
+#         for i in range(1, len(route)):
+#             # print(route[i])
+#             if tasks_info[route[i]]['Type'] == 'f':
+#                 time_cost += 0
+#             elif tasks_info[route[i]]['Type'] == 'c':
+#                 time_cost += tasks_info[route[i]]['Due-Date'] - arrival_times[i]
+#             # print(time_cost)
+#         route_cost = dist_cost + 0.1 * time_cost + 1000
+#         total_cost += route_cost
+#
+#     # can be removed in deployment, just for testing
+#     # for route in routes:
+#     #     if compute_route_load(route, demands_data) > truck_capacity:
+#     #         print('TOO MUCH LOAD FOR TRUCK')
+#     return total_cost
+
 def evaluate_solution(routes, tasks_info, distance_matrix, tank_capacity, now_energy,
                       fuel_consumption_rate, charging_rate, velocity):
-    total_cost = 0
-
-    for idx, route in enumerate(routes):
-        vehicle_energy = cvrp_helper_functions.get_vehicle_energy(now_energy, idx, tank_capacity)
-        dist_cost = cvrp_helper_functions.calculate_route_distance(route, distance_matrix)
-        # print(dist_cost)
-        arrival_times = cvrp_helper_functions.calculate_arrival_times(
-            route, tasks_info, distance_matrix, tank_capacity, vehicle_energy,
-            fuel_consumption_rate, charging_rate, velocity
-        )
-        time_cost = 0
-        for i in range(1, len(route)):
-            # print(route[i])
-            if tasks_info[route[i]]['Type'] == 'f':
-                time_cost += 0
-            elif tasks_info[route[i]]['Type'] == 'c':
-                time_cost += tasks_info[route[i]]['Due-Date'] - arrival_times[i]
-            # print(time_cost)
-        route_cost = dist_cost + 0.1 * time_cost + 1000
-        total_cost += route_cost
-
-    # can be removed in deployment, just for testing
-    # for route in routes:
-    #     if compute_route_load(route, demands_data) > truck_capacity:
-    #         print('TOO MUCH LOAD FOR TRUCK')
-    return total_cost
-
+    evaluation = cvrp_helper_functions.evaluate_solution_cost_and_energy(
+        routes,
+        tasks_info=tasks_info,
+        distance_matrix=distance_matrix,
+        tank_capacity=tank_capacity,
+        initial_energy=now_energy,
+        fuel_consumption_rate=fuel_consumption_rate,
+        charging_rate=charging_rate,
+        velocity=velocity,
+    )
+    return evaluation['total_cost']
 
 class cvrpEnv:
     def __init__(self, initial_solution, tank_capacity, now_energy, load_capacity, fuel_consumption_rate,
