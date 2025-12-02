@@ -8,6 +8,235 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 from pathlib import Path
 
+
+def _evaluate_route_metrics(
+        route: Sequence[Any],
+        route_index: int,
+        tasks_info,
+        distance_matrix,
+        tank_capacity,
+        now_energy,
+        fuel_consumption_rate,
+        charging_rate,
+        velocity,
+        load_capacity: Optional[float] = None,
+):
+    """Internal helper that computes detailed metrics for a single route."""
+
+    initial_energy = get_vehicle_energy(now_energy, route_index, tank_capacity)
+
+    if not route:
+        remaining_energy = float(initial_energy)
+        return {
+            'index': route_index,
+            'route': [],
+            'initial_energy': float(initial_energy),
+            'remaining_energy': remaining_energy,
+            'distance_cost': 0.0,
+            'time_cost': 0.0,
+            'route_cost': 0.0,
+            'is_feasible': True if load_capacity is not None else None,
+        }
+
+    dist_cost = calculate_route_distance(route, distance_matrix)
+    arrival_times = calculate_arrival_times(
+        route,
+        tasks_info,
+        distance_matrix,
+        tank_capacity,
+        initial_energy,
+        fuel_consumption_rate,
+        charging_rate,
+        velocity,
+    )
+
+    time_cost = 0.0
+    for i in range(1, len(route)):
+        node = route[i]
+        if tasks_info[node]['Type'] == 'c':
+            time_cost += tasks_info[node]['Due-Date'] - arrival_times[i]
+
+    route_cost = dist_cost + 0.5 * time_cost + 200
+
+    remaining_energy = calculate_remaining_tank(
+        route,
+        tasks_info,
+        distance_matrix,
+        tank_capacity,
+        initial_energy,
+        fuel_consumption_rate,
+    )
+
+    feasible: Optional[bool] = None
+    if load_capacity is not None:
+        feasible = is_feasible(
+            route,
+            tasks_info,
+            distance_matrix,
+            tank_capacity,
+            initial_energy,
+            fuel_consumption_rate,
+            charging_rate,
+            velocity,
+            load_capacity,
+        )
+
+    return {
+        'index': route_index,
+        'route': list(route),
+        'initial_energy': float(initial_energy),
+        'remaining_energy': float(remaining_energy),
+        'distance_cost': float(dist_cost),
+        'time_cost': float(time_cost),
+        'route_cost': float(route_cost),
+        'is_feasible': feasible,
+    }
+
+
+def evaluate_routes_with_energy(
+        routes: Sequence[Sequence[Any]],
+        tasks_info,
+        distance_matrix,
+        tank_capacity,
+        now_energy,
+        fuel_consumption_rate,
+        charging_rate,
+        velocity,
+        load_capacity: Optional[float] = None,
+):
+    """Evaluate manually supplied routes and return cost and energy details.
+
+    Parameters
+    ----------
+    routes:
+        A list of routes, where each route is an ordered list of node identifiers.
+    tasks_info, distance_matrix, tank_capacity, fuel_consumption_rate, charging_rate, velocity:
+        Problem data describing the instance.
+    now_energy:
+        Initial energy configuration. Accepts a scalar, sequence or dictionary, in the
+        same format as other helpers in this module.
+    load_capacity:
+        Optional vehicle load capacity. When provided, a feasibility flag is computed
+        for each route using the existing constraint checks.
+
+    Returns
+    -------
+    dict
+        A dictionary containing the total cost, the per-route breakdown and the
+        remaining energy for each vehicle. This makes it easy to check the cost of
+        user-provided solutions period by period.
+    """
+
+    route_summaries = []
+    total_cost = 0.0
+
+    for idx, route in enumerate(routes):
+        summary = _evaluate_route_metrics(
+            route,
+            idx,
+            tasks_info,
+            distance_matrix,
+            tank_capacity,
+            now_energy,
+            fuel_consumption_rate,
+            charging_rate,
+            velocity,
+            load_capacity,
+        )
+        route_summaries.append(summary)
+        total_cost += summary['route_cost']
+
+    remaining_energies = [summary['remaining_energy'] for summary in route_summaries]
+
+    return {
+        'total_cost': float(total_cost),
+        'route_summaries': route_summaries,
+        'remaining_energies': remaining_energies,
+    }
+
+
+def evaluate_solution_cost_and_energy(
+        routes: Sequence[Sequence[Any]],
+        *,
+        tasks_info,
+        distance_matrix,
+        tank_capacity: float,
+        initial_energy: Union[float, Sequence[float], Dict[int, float]],
+        fuel_consumption_rate: float,
+        charging_rate: float,
+        velocity: float,
+        load_capacity: Optional[float] = None,
+):
+    """Convenience wrapper that exposes cost/energy computation for custom routes.
+
+    这个函数可以直接用于手动指定的解：
+
+    ``routes``
+        每一辆车的路径（如 ``[["d0", "c1", "c2", "d0"], ...]``）。
+    ``tasks_info`` 和 ``distance_matrix``
+        来自实例文件（例如通过 :func:`build_tasks_info` 构造）。
+    其余参数
+        为车辆的相关属性：油箱容量、初始电量（可为单个数值或列表/字典）、
+        能耗率、充电速率、行驶速度以及可选的载重容量。
+
+    返回一个包含以下字段的字典：
+
+    ``total_cost``
+        该方案的总成本。
+    ``remaining_energies``
+        每辆车在完成各自路径后的剩余电量，可直接作为下一周期的初始电量。
+    ``route_summaries``
+        逐车的明细，包括距离成本、时间成本、可行性判定等。
+    """
+
+    evaluation = evaluate_routes_with_energy(
+        routes,
+        tasks_info,
+        distance_matrix,
+        tank_capacity,
+        initial_energy,
+        fuel_consumption_rate,
+        charging_rate,
+        velocity,
+        load_capacity,
+    )
+
+    return {
+        'total_cost': evaluation['total_cost'],
+        'remaining_energies': evaluation['remaining_energies'],
+        'route_summaries': evaluation['route_summaries'],
+    }
+
+
+def load_period_task_data(file: str) -> Dict[str, Any]:
+    """读取实例文件并返回便于逐周期调用的数据结构。
+
+    该函数在不修改原有解析逻辑的前提下复用 :func:`load_multi_period_instance`
+    组装输出，方便直接拿到 ``tasks_info`` 与 ``distance_matrix``。返回的字典
+    结构清晰，对接逐周期的手动验证流程更为便捷。
+    """
+
+    instance = load_multi_period_instance(file)
+
+    period_summaries = [
+        {
+            'name': period.name,
+            'nodes': period.nodes,
+            'customers': period.customers,
+            'tasks_info': period.tasks_info,
+            'distance_matrix': period.distance_matrix,
+        }
+        for period in instance.periods
+    ]
+
+    return {
+        'vehicle': instance.vehicle,
+        'depot': instance.depot,
+        'fuel_stations': instance.fuel_stations,
+        'periods': period_summaries,
+    }
+
+
 def read_elem(filename):
     with open(filename) as f:
         return [str(elem) for elem in f.read().split()]
@@ -608,6 +837,7 @@ def tank_capacity_constraint_violated(route, tasks_info, distance_matrix, tank_c
 def calculate_arrival_times(route, tasks_info, distance_matrix, tank_capacity, now_energy,
                             fuel_consumption_rate, charging_rate, velocity):
     elapsed_time = tasks_info['D0']['call-time']
+
     last = None
     arrival_times = [elapsed_time]
 
@@ -616,14 +846,15 @@ def calculate_arrival_times(route, tasks_info, distance_matrix, tank_capacity, n
             travel_time = distance_matrix[last][i] / velocity
             elapsed_time += travel_time
 
-
             # 记录当前节点的实际到达时间
             arrival_times.append(elapsed_time)
 
             if tasks_info[i]['Type'] == 'f':
+
                 missing_energy = tank_capacity - calculate_remaining_tank(route, tasks_info, distance_matrix,
                                                                           tank_capacity, now_energy,
                                                                           fuel_consumption_rate, until=i)
+
                 tasks_info[i]['Service-Time'] = missing_energy * charging_rate
 
             elapsed_time += tasks_info[i]['Service-Time']
@@ -634,23 +865,26 @@ def calculate_arrival_times(route, tasks_info, distance_matrix, tank_capacity, n
 
 def calculate_remaining_tank1(route, tasks_info, distance_matrix, tank_capacity, now_energy, fuel_consumption_rate,
                              until=None):
+
     last = None
     # now_energy = float(now_energy)
     now_energy = now_energy
+
     total_consumption = 0
     for t in route:
+
         if last is not None:
             distance = distance_matrix[last][t]
             consumption = distance * fuel_consumption_rate
             # total_consumption += consumption
             now_energy -= consumption
 
+            if until == t:
+                return now_energy
+
             if tasks_info[t]['Type'] == 'f':
                 now_energy = tank_capacity
 
-            if until == t:
-                return now_energy
-            print(now_energy)
         last = t
         # print(total_consumption)
     return now_energy
@@ -669,11 +903,11 @@ def calculate_remaining_tank(route, tasks_info, distance_matrix, tank_capacity, 
             # total_consumption += consumption
             now_energy -= consumption
 
-            if tasks_info[t]['Type'] == 'f':
-                now_energy = tank_capacity
-
             if until == t:
                 return now_energy
+
+            if tasks_info[t]['Type'] == 'f':
+                now_energy = tank_capacity
 
         last = t
         # print(total_consumption)
@@ -753,6 +987,7 @@ def find_optimal_charging_station_insertion(route, nodes, tasks_info, distance_m
     min_route_cost = float('inf')
 
     for i in range(1, len(route)):
+
         if tasks_info[route[i]]['Type'] != 'f':
             reachable_stations = get_reachable_charging_stations(route[:i], nodes, tasks_info, distance_matrix,
                                                                  tank_capacity, now_energy, fuel_consumption_rate,
@@ -802,6 +1037,38 @@ def make_route_feasible_and_best(route, nodes, tasks_info, distance_matrix, tank
         # print("YES")
         # print(best_feasible_route)
         return best_feasible_route
+
+
+def make_route_feasible(route, nodes, tasks_info, distance_matrix, tank_capacity, now_energy, vehicle_energy,
+                                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    reachable_stations = get_reachable_charging_stations(route, nodes, tasks_info, distance_matrix,
+                                                         tank_capacity, now_energy, fuel_consumption_rate,
+                                                         until=route[-1])
+    if reachable_stations is None:
+        return None
+    nearest_station = min(
+        reachable_stations,
+        key=lambda candidate: distance_matrix[route[-1]][candidate]
+    )
+    feasible_route = route.insert(-1, nearest_station)
+
+    if not is_feasible(feasible_route, tasks_info, distance_matrix, tank_capacity, now_energy,
+                            fuel_consumption_rate, charging_rate, velocity, load_capacity):
+        # print("NO")
+        return None
+    else:
+        # print("YES")
+        # print(best_feasible_route)
+        return feasible_route
+
+
+    # if need_charge(route, distance_matrix, vehicle_energy, fuel_consumption_rate, tank_capacity):
+    #     while is_feasible(route, tasks_info, distance_matrix, tank_capacity, now_energy,
+    #                         fuel_consumption_rate, charging_rate, velocity, load_capacity):
+    #         reachable_stations = get_reachable_charging_stations(route, nodes, tasks_info, distance_matrix,
+    #                                                          tank_capacity, now_energy, fuel_consumption_rate,
+    #                                                          until=route[-1])#如果没有可以找到的，也要移除客户
+
 
 
 def process_route(state, nodes, tasks_info, distance_matrix, tank_capacity, now_energy,
@@ -935,7 +1202,7 @@ def calculate_route_cost(route, tasks_info, distance_matrix, tank_capacity, now_
             elif tasks_info[route[i]]['Type'] == 'c':
                 time_cost += tasks_info[route[i]]['Due-Date']-arrival_times[i]
             # print(time_cost)
-        route_cost = dist_cost + 0.1 * time_cost + 1000
+        route_cost = dist_cost + 0.5 * time_cost + 200
 
     return route_cost
 
@@ -954,7 +1221,7 @@ def calculate_nc_route_cost(route, tasks_info, distance_matrix, tank_capacity, n
         # print(time_cost)
         elif tasks_info[route[i]]['Type'] == 'f':
             time_cost += 0
-    route_cost = dist_cost + 0.1 * time_cost
+    route_cost = dist_cost + 0.5 * time_cost
 
     return route_cost
 
